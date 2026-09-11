@@ -83,6 +83,7 @@ const CAPABILITIES = [
   'frames',       // 框架诊断
   'wait',         // 等待条件成立
   'diag',         // 扩展运行诊断
+  'activate',     // 激活标签页（唤醒冻结标签页）
   'reload',       // 重新加载扩展自身（开发用）
   'multiBrowser'  // 多浏览器隔离与路由
 ];
@@ -431,6 +432,20 @@ async function handle(req, res) {
       tabId: body.tabId
     }, clampTimeout(body.timeoutMs));
 
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  // ---- 激活标签页 ----
+  if (req.method === 'POST' && path === '/activate') {
+    const body = await readBody(req).catch(() => ({}));
+    const result = await dispatch({
+      action: 'activate',
+      browser: body.browser,
+      match: body.match,
+      url: body.url,
+      tabId: body.tabId
+    }, clampTimeout(body.timeoutMs));
     sendJson(res, result.ok ? 200 : 502, result, req);
     return;
   }

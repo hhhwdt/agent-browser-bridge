@@ -47,6 +47,7 @@ It also handles the awkward realities of real sites: cross-frame editors (TinyMC
 | `wait` | Wait for an element/text to appear or disappear |
 | `frames` | Diagnose which frame holds the editor and how it is editable |
 | `tabs` / `mark` / `unmark` / `close` | Tab management with a visible "agent is working here" marker |
+| `activate` | Bring a tab to the foreground; wakes a frozen tab so it can be injected |
 | `diag` | Extension runtime diagnostics: version, polling, SW restarts, errors |
 | Multi-browser | Chrome and Edge run side by side, fully isolated, with automatic routing |
 
@@ -183,6 +184,24 @@ Pass `ttlMs` to `mark` to change the auto-expire window (`0` = never expire).
 Note on the favicon: the link's `type` attribute **must** be updated to `image/png` when swapping
 in a PNG data URL. Leaving it as `image/x-icon` makes the browser fail to decode it and silently
 fall back to the original icon.
+
+## Frozen tabs
+
+Browsers freeze long-idle background tabs. A frozen renderer does not respond to
+`chrome.scripting.executeScript`, so operations against it hang. The bridge handles this in two
+ways:
+
+- Every injection is wrapped in a timeout, so an unresponsive tab fails fast with
+  `tab_unresponsive` instead of hanging the task (and, before this, the whole polling loop).
+- `activate` brings the tab to the foreground, which wakes it. Use it when a tab must be operated
+  on and `read`/`click`/`type` keep returning `tab_unresponsive`:
+
+```
+node read.js activate --match "example.com/page"
+```
+
+`activate` changes what the user is looking at, so it is a disruptive operation — call it only
+when needed, and restore the previously active tab afterwards if the user was working elsewhere.
 
 ## Frame handling
 

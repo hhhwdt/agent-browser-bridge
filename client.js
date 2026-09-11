@@ -213,6 +213,20 @@ class BrowserBridgeClient {
     }, (options.timeoutMs || 10000) + 5000);
   }
 
+  /**
+   * 激活标签页并聚焦其窗口。
+   * 长期未访问的标签页会被浏览器冻结，注入无响应，需先唤醒。
+   * 注意：会切换用户当前视图。
+   */
+  activate(options = {}) {
+    return this.call('POST', '/activate', {
+      match: options.match,
+      url: options.url,
+      tabId: options.tabId,
+      browser: options.browser
+    }, options.timeoutMs);
+  }
+
   /** 扩展自身的运行诊断：版本、连接、错误日志。 */
   diag(options = {}) {
     return this.call('POST', '/diag', { browser: options.browser }, options.timeoutMs || 10000);

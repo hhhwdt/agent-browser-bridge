@@ -231,6 +231,21 @@ async function main() {
         return;
       }
 
+      case 'activate': {
+        requireTarget(args);
+        const data = await client.activate({
+          match: args.match,
+          url: args.url,
+          tabId: num(args.tabId),
+          browser: args.browser,
+          timeoutMs
+        });
+        if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
+        console.log('已激活  : ' + data.title.slice(0, 50));
+        console.log('标签页  : ' + data.tabId + (data.wasActive ? '（原本就是激活的）' : '（已从后台切到前台）'));
+        return;
+      }
+
       case 'wait': {
         requireTarget(args);
         if (!args.selector && !args.text) {

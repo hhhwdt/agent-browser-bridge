@@ -1298,6 +1298,47 @@ async function waitTab(task) {
   };
 }
 
+/**
+ * 把一个标签页切到前台并聚焦其窗口。
+ *
+ * 用途：长期未访问的标签页会被浏览器冻结，渲染进程不响应注入。
+ * 需要对其操作时先唤醒。会改变用户当前视图，属于打断性操作。
+ */
+async function activateTab(task) {
+  const tab = await resolveTab(task);
+  if (!tab || typeof tab.id !== 'number') {
+    return { ok: false, error: 'no_tab_matched', hint: '没有找到匹配的标签页' };
+  }
+
+  const wasActive = !!tab.active;
+  if (!wasActive) {
+    try {
+      await chrome.tabs.update(tab.id, { active: true });
+    } catch (e) {
+      return { ok: false, error: 'activate_failed', message: String(e && e.message ? e.message : e) };
+    }
+  }
+
+  // 窗口最小化时，仅激活标签页不足以唤醒渲染进程
+  try {
+    await chrome.windows.update(tab.windowId, { focused: true });
+  } catch (e) {
+    // 窗口 API 失败不影响标签页已激活的事实
+  }
+
+  return {
+    ok: true,
+    data: {
+      tabId: tab.id,
+      windowId: tab.windowId,
+      wasActive,
+      browser: BROWSER_NAME,
+      title: tab.title || '',
+      url: tab.url || ''
+    }
+  };
+}
+
 /** 诊断标签页内所有框架的状态，返回全部框架结果（不做挑选）。 */
 async function framesDiag(task) {
   const tab = await resolveTab(task);
@@ -2012,6 +2053,8 @@ async function runAction(task) {
       return await waitTab(task);
     case 'diag':
       return await diagAction();
+    case 'activate':
+      return await activateTab(task);
     case 'click':
       return await clickTab(task);
     case 'type':
