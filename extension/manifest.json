@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Browser Bridge",
+  "version": "1.0.0",
+  "description": "本地桥接扩展：允许本机已授权的 agent 后台读取已打开标签页的内容，不切换标签、不抢占焦点。",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:18777/*",
+    "http://localhost:18777/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Agent Browser Bridge"
+  }
+}

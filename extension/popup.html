@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      font-size: 13px;
+      width: 340px;
+      margin: 0;
+      padding: 12px;
+      color: #1f2328;
+    }
+    h3 { margin: 0 0 8px; font-size: 14px; }
+    .row { margin: 6px 0; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #d0d7de; flex: none; }
+    .dot.ok { background: #1a7f37; }
+    .dot.bad { background: #cf222e; }
+    input[type=text] {
+      flex: 1;
+      padding: 4px 6px;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    button {
+      padding: 4px 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      background: #f6f8fa;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover { background: #eaeef2; }
+    button.primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+    button.primary:hover { background: #1a7f37; }
+    .muted { color: #656d76; font-size: 11px; line-height: 1.5; }
+    ul { margin: 6px 0; padding-left: 18px; }
+    li { margin: 2px 0; font-size: 11px; color: #656d76; }
+    hr { border: 0; border-top: 1px solid #eaeef2; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h3>Agent Browser Bridge</h3>
+
+  <div class="row">
+    <span class="dot" id="bridgeDot"></span>
+    <span id="bridgeStatus">正在检测桥接服务…</span>
+  </div>
+
+  <hr />
+
+  <div class="muted">已授权可读取的站点：</div>
+  <ul id="originList"><li>读取中…</li></ul>
+
+  <div class="row">
+    <input type="text" id="originInput" placeholder="例如 confluence.example.com" />
+    <button id="grantBtn" class="primary">授权</button>
+  </div>
+
+  <div class="row">
+    <button id="grantAllBtn">授权所有站点</button>
+    <button id="revokeAllBtn">撤销全部</button>
+  </div>
+
+  <hr />
+  <div class="muted">
+    本扩展只读，不提供点击、输入、导航操作；只连接本机 127.0.0.1，不访问外部网络。
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
