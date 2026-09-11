@@ -1,0 +1,54 @@
+{
+  "name": "agent-browser-bridge",
+  "version": "1.7.0",
+  "description": "Let local agents drive your already-open browser in the background, without stealing focus.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/client.js",
+  "bin": {
+    "agent-browser-bridge": "src/cli.js",
+    "agent-browser-bridge-mcp": "src/mcp.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src/",
+    "extension/",
+    "docs/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "setup": "node src/setup.js",
+    "start": "node src/server.js",
+    "mcp": "node src/mcp.js",
+    "test": "node test/test-offline.js",
+    "test:browser": "node test/test-live.js",
+    "test:basic": "node test/test-basic.js"
+  },
+  "keywords": [
+    "browser-automation",
+    "chrome-extension",
+    "edge-extension",
+    "mcp",
+    "model-context-protocol",
+    "cdp",
+    "agent",
+    "llm",
+    "background-tab",
+    "sso",
+    "screenshot",
+    "cookie"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hhhwdt/agent-browser-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hhhwdt/agent-browser-bridge/issues"
+  },
+  "homepage": "https://github.com/hhhwdt/agent-browser-bridge#readme",
+  "dependencies": {}
+}

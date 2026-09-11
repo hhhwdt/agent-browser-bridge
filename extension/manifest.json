@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Browser Bridge",
+  "version": "1.7.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxp1nQ3Fsz1jtVGIDmsEbNRFT72C4gwjHDNtO/LSWQsfAAnKARAmBUAzRFYOOhLRkQTwxqebFVaP9DJK+sYzGMwMKdDIHMWKjY2/xm1tBO9+BeS8HVHOGopRit0QuJJom1lxDxFzrtU8GzxtyVvgKDsU+gk8mv75eBN6Y/slPrnjHmTHHvi3O8sC1y7ryCYLy+yg73cOJlI5D9dgvhnZJcDfWq8YZEqQMo6KsDEBq2h9JahLFk7Fy/xngB3JiIEWHv1v6PS+ynKf//fLd0ZVbnw89U2a34248CemOjw+4jgp8CgpIF1ra6NVJs3bbfFbkmCnMIOdQOtfm62UcaolIjQIDAQAB",
+  "description": "本地桥接扩展：允许本机已授权的 agent 后台读取并操作已打开标签页，不切换标签、不抢占焦点。",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage",
+    "alarms",
+    "debugger",
+    "downloads"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:18777/*",
+    "http://localhost:18777/*"
+  ],
+  "optional_permissions": [
+    "cookies"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "sw/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Agent Browser Bridge"
+  }
+}

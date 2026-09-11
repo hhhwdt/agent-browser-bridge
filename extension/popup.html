@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      font-size: 13px;
+      width: 340px;
+      margin: 0;
+      padding: 12px;
+      color: #1f2328;
+    }
+    h3 { margin: 0 0 8px; font-size: 14px; }
+    .row { margin: 6px 0; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #d0d7de; flex: none; }
+    .dot.ok { background: #1a7f37; }
+    .dot.bad { background: #cf222e; }
+    input[type=text] {
+      flex: 1;
+      padding: 4px 6px;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    button {
+      padding: 4px 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      background: #f6f8fa;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover { background: #eaeef2; }
+    button.primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+    button.primary:hover { background: #1a7f37; }
+    .muted { color: #656d76; font-size: 11px; line-height: 1.5; }
+    ul { margin: 6px 0; padding-left: 18px; }
+    li { margin: 2px 0; font-size: 11px; color: #656d76; }
+    hr { border: 0; border-top: 1px solid #eaeef2; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h3>Agent Browser Bridge</h3>
+
+  <div class="row">
+    <span class="dot" id="bridgeDot"></span>
+    <span id="bridgeStatus">正在检测桥接服务…</span>
+  </div>
+
+  <hr />
+
+  <div class="muted">被操作的标签页：</div>
+  <div class="row">
+    <span id="markSummary">读取中…</span>
+    <button id="clearMarksBtn">清除所有标记</button>
+  </div>
+  <div class="muted" id="markHint">
+    标记会在标签标题前加 🤖 并在图标上加点，用于提示这些页面正被 agent 操作。
+  </div>
+
+  <hr />
+
+  <div class="muted">已授权可读取的站点：</div>
+  <ul id="originList"><li>读取中…</li></ul>
+
+  <div class="row">
+    <input type="text" id="originInput" placeholder="例如 confluence.example.com" />
+    <button id="grantBtn" class="primary">授权</button>
+  </div>
+
+  <div class="row">
+    <button id="grantAllBtn">授权所有站点</button>
+    <button id="revokeAllBtn">撤销全部</button>
+  </div>
+
+  <hr />
+
+  <div class="muted">可选权限（默认关闭，需单独授予）：</div>
+  <ul id="advList"><li>读取中…</li></ul>
+  <div class="row">
+    <button id="grantAdvBtn" class="primary">授予</button>
+    <button id="revokeAdvBtn">撤销</button>
+  </div>
+  <div class="muted">
+    授予后解锁 <b>session</b>（读取登录 Cookie 与站点存储）。未授予时该动作返回明确提示，其余功能不受影响。
+  </div>
+
+  <hr />
+  <div class="muted">
+    <b>debugger</b> 是必需权限（Chrome 不允许它作为可选权限），
+    用于 <b>upload</b>（向文件选择框填入本地文件）和 <b>screenshot</b> 的元素/整页/后台标签截图。
+    附加调试器时浏览器顶部会显示提示条，属正常现象。
+  </div>
+
+  <hr />
+  <div class="muted">
+    只连接本机 127.0.0.1，不访问外部网络。可读页面内容并在授权范围内点击、输入。
+  </div>
+
+  <hr />
+  <div class="muted">
+    扩展 ID：<span id="extId">读取中…</span><br />
+    桥接服务只放行允许列表内的扩展 ID。若服务端日志提示拒绝本扩展，用
+    <code>--allow-extension &lt;上面的 ID&gt;</code> 启动服务。
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

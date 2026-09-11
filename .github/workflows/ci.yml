@@ -1,0 +1,35 @@
+# 离线测试：不需要浏览器、不需要 test-config.js、不碰任何正在运行的服务。
+#
+# 这些套件各自在隔离端口上启动自己的 server.js，或在 Node 里用替身驱动扩展的注入函数，
+# 因此能在干净的 CI 机器上跑。需要真实浏览器的部分（test-live.js、test-basic.js 等）
+# 不在这里跑——那需要一个已登录的浏览器和一个配置好的测试页。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines 里写的是 >=18，这里把那句话验掉
+        node-version: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: 依赖情况（应当没有任何第三方依赖）
+        run: |
+          node -e "const p=require('./package.json');const n=Object.keys(p.dependencies||{}).length;console.log('dependencies:', n);if(n){process.exit(1)}"
+
+      - name: 离线套件
+        env:
+          ABB_MCP_OFFLINE: '1'
+        run: node test/test-offline.js
