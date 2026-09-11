@@ -1084,7 +1084,9 @@ async function listTabs() {
         discarded: !!t.discarded,
         status: t.status || '',
         title: t.title || '',
-        url: t.url || ''
+        url: t.url || '',
+        // 我们打标记时会把图标换成 data URL，据此可发现标题前缀已丢的残留标记
+        favIconUrl: (t.favIconUrl || '').slice(0, 60)
       }))
   };
 }
@@ -1491,7 +1493,16 @@ async function collectMarkedTabs() {
     const all = await chrome.tabs.query({});
     for (const t of all) {
       if (typeof t.id !== 'number') { continue; }
+
+      // 标题前缀还在 —— 明确的标记
       if (typeof t.title === 'string' && t.title.startsWith(TITLE_PREFIX)) {
+        ids.add(t.id);
+        continue;
+      }
+
+      // 标题前缀丢了但图标仍是我们的 data URL —— 同样是残留标记。
+      // 页面自己改写了 title（SPA 常见）时会出现这种半边残留，只靠标题扫不到。
+      if (typeof t.favIconUrl === 'string' && t.favIconUrl.startsWith('data:image/')) {
         ids.add(t.id);
       }
     }
