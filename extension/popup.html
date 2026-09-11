@@ -50,6 +50,17 @@
 
   <hr />
 
+  <div class="muted">被操作的标签页：</div>
+  <div class="row">
+    <span id="markSummary">读取中…</span>
+    <button id="clearMarksBtn">清除所有标记</button>
+  </div>
+  <div class="muted" id="markHint">
+    标记会在标签标题前加 🤖 并在图标上加点，用于提示这些页面正被 agent 操作。
+  </div>
+
+  <hr />
+
   <div class="muted">已授权可读取的站点：</div>
   <ul id="originList"><li>读取中…</li></ul>
 
@@ -65,7 +76,7 @@
 
   <hr />
   <div class="muted">
-    本扩展只读，不提供点击、输入、导航操作；只连接本机 127.0.0.1，不访问外部网络。
+    只连接本机 127.0.0.1，不访问外部网络。可读页面内容并在授权范围内点击、输入。
   </div>
 
   <script src="popup.js"></script>

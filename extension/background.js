@@ -842,17 +842,21 @@ function tabMarkInPage(opts) {
   const ATTR_TYPE = 'data-abb-favicon-original-type';
   const ATTR_TITLE = 'data-abb-original-title';
   const CREATED_ID = '__abb_favicon_mark__';
+  // 必须在本函数内定义：注入到页面的函数拿不到模块作用域的常量
+  const DEFAULT_TITLE_PREFIX = '🤖 ';
 
   const ICON_SEL = 'link[rel~="icon"], link[rel="shortcut icon"]';
+  const TIMER_KEY = '__abb_mark_timer__';
 
-  // ---- 清除：还原标题与图标 ----
-  if (opts && opts.clear) {
+  /** 还原标题与图标。清空标记与自动过期共用这段逻辑。 */
+  const restore = () => {
     let restored = 0;
 
     const root = document.documentElement;
     if (root.hasAttribute(ATTR_TITLE)) {
       document.title = root.getAttribute(ATTR_TITLE);
       root.removeAttribute(ATTR_TITLE);
+      restored++;
     }
 
     document.querySelectorAll('link[' + ATTR_HREF + ']').forEach((l) => {
@@ -872,7 +876,21 @@ function tabMarkInPage(opts) {
     });
     const created = document.getElementById(CREATED_ID);
     if (created) { created.remove(); restored++; }
-    return { ok: true, cleared: restored > 0 };
+
+    return restored;
+  };
+
+  /** 取消已排期的自动过期。 */
+  const cancelTimer = () => {
+    try {
+      if (window[TIMER_KEY]) { clearTimeout(window[TIMER_KEY]); window[TIMER_KEY] = null; }
+    } catch (e) { /* 忽略 */ }
+  };
+
+  // ---- 清除：还原标题与图标 ----
+  if (opts && opts.clear) {
+    cancelTimer();
+    return { ok: true, cleared: restore() > 0 };
   }
 
   // ---- 标题前缀 ----
@@ -883,7 +901,7 @@ function tabMarkInPage(opts) {
     root.setAttribute(ATTR_TITLE, document.title);
   }
   const baseTitle = root.getAttribute(ATTR_TITLE);
-  const prefix = opts.titlePrefix || '🤖 ';
+  const prefix = opts.titlePrefix || DEFAULT_TITLE_PREFIX;
   if (document.title !== prefix + baseTitle) {
     document.title = prefix + baseTitle;
   }
@@ -992,12 +1010,26 @@ function tabMarkInPage(opts) {
     } catch (e) { /* 忽略，纯色底已可用 */ }
   }
 
+  // ---- 自动过期 ----
+  // 页面侧定时器。后台标签页的定时器会被节流，但用户一旦切回该标签页就会触发，
+  // 因此标记不会永久残留——这是"冻住的标签页清不掉"的兜底方案。
+  const ttlMs = typeof opts.ttlMs === 'number' ? opts.ttlMs : 10 * 60 * 1000;
+  cancelTimer();
+  if (ttlMs > 0) {
+    try {
+      window[TIMER_KEY] = setTimeout(() => {
+        try { restore(); } catch (e) { /* 忽略 */ }
+      }, ttlMs);
+    } catch (e) { /* 定时器不可用时忽略 */ }
+  }
+
   return {
     ok: true,
     marked: true,
     mode: installed.mode,
     accent,
     titleMarked: true,
+    autoExpireMs: ttlMs,
     originalUpgradePending: !!href
   };
 }
@@ -1060,6 +1092,9 @@ async function listTabs() {
  * 会把整个任务（乃至轮询循环）一起拖死。加超时后快速失败并给出明确原因。
  */
 const INJECT_TIMEOUT_MS = 12000;
+
+/** 视觉标记类注入的预算。标记是锦上添花，遇到冻结标签页不值得久等。 */
+const MARK_INJECT_TIMEOUT_MS = 4000;
 
 /** 给 Promise 加超时。用于包装可能永不返回的浏览器 API 调用。 */
 function withTimeout(promise, ms, label) {
@@ -1364,6 +1399,8 @@ async function ensureInjectable(tab) {
  * ------------------------------------------------------------------ */
 const BADGE_TEXT = 'A';
 const BADGE_COLOR = '#1a7f37';
+// 标题前缀，同时作为"该标签页被标记过"的可发现标志
+const TITLE_PREFIX = '🤖 ';
 // 按操作类型区分徽标底色，与页面内浮层强调色保持一致
 const BADGE_COLORS = {
   read: '#1f6feb',
@@ -1377,24 +1414,48 @@ const BADGE_COLORS = {
 const MARKS_KEY = 'abb-marked-tabs';
 const markedTabs = new Set();
 
+// 用 storage.local 而非 storage.session：session 在扩展重载时会清空，
+// 而页面上的标记（标题前缀、图标角标）是留在页面里的，会变成清不掉的残留。
 async function loadMarks() {
   try {
-    const stored = await chrome.storage.session.get(MARKS_KEY);
+    const stored = await chrome.storage.local.get(MARKS_KEY);
     const ids = stored && stored[MARKS_KEY];
     if (Array.isArray(ids)) {
       ids.forEach((id) => markedTabs.add(id));
     }
   } catch (e) {
-    // 会话存储不可用时退化为仅内存记录
+    // 存储不可用时退化为仅内存记录
   }
 }
 
 async function saveMarks() {
   try {
-    await chrome.storage.session.set({ [MARKS_KEY]: Array.from(markedTabs) });
+    await chrome.storage.local.set({ [MARKS_KEY]: Array.from(markedTabs) });
   } catch (e) {
     // 保存失败不影响当前会话内的标记行为
   }
+}
+
+/**
+ * 收集所有被标记的标签页。
+ *
+ * 除了内存记录，还会按标题前缀扫描一遍：扩展重载后内存记录可能丢失，
+ * 但页面上的标记仍在，只靠内存会留下永远清不掉的残留。
+ */
+async function collectMarkedTabs() {
+  const ids = new Set(markedTabs);
+  try {
+    const all = await chrome.tabs.query({});
+    for (const t of all) {
+      if (typeof t.id !== 'number') { continue; }
+      if (typeof t.title === 'string' && t.title.startsWith(TITLE_PREFIX)) {
+        ids.add(t.id);
+      }
+    }
+  } catch (e) {
+    // 查询失败时退回仅用内存记录
+  }
+  return Array.from(ids);
 }
 
 /** 给标签页打上徽标标记。 */
@@ -1433,7 +1494,7 @@ async function showIndicator(tabId, text, ttlMs, kind) {
       target: { tabId },
       func: indicatorInPage,
       args: [{ text, ttlMs: typeof ttlMs === 'number' ? ttlMs : 15000, kind }]
-    }), INJECT_TIMEOUT_MS, 'showIndicator');
+    }), MARK_INJECT_TIMEOUT_MS, 'showIndicator');
     return true;
   } catch (e) {
     return false;
@@ -1447,7 +1508,7 @@ async function hideIndicator(tabId) {
       target: { tabId },
       func: indicatorInPage,
       args: [{ clear: true }]
-    }), INJECT_TIMEOUT_MS, 'hideIndicator');
+    }), MARK_INJECT_TIMEOUT_MS, 'hideIndicator');
     return true;
   } catch (e) {
     return false;
@@ -1477,13 +1538,13 @@ async function markTab(tabId, action, detail) {
 }
 
 /** 在标签栏的站点图标上叠加角标，让用户一眼看出该标签页正被操作。 */
-async function markFavicon(tabId, accent) {
+async function markFavicon(tabId, accent, ttlMs) {
   try {
     const inj = await withTimeout(chrome.scripting.executeScript({
       target: { tabId },
       func: tabMarkInPage,
-      args: [{ accent }]
-    }), INJECT_TIMEOUT_MS, 'markFavicon');
+      args: [{ accent, ttlMs }]
+    }), MARK_INJECT_TIMEOUT_MS, 'markFavicon');
     const first = inj && inj[0];
     if (!first) { return { ok: false, error: 'no_injection_result' }; }
     if (first.error) {
@@ -1502,7 +1563,7 @@ async function unmarkFavicon(tabId) {
       target: { tabId },
       func: tabMarkInPage,
       args: [{ clear: true }]
-    }), INJECT_TIMEOUT_MS, 'unmarkFavicon');
+    }), MARK_INJECT_TIMEOUT_MS, 'unmarkFavicon');
     const first = inj && inj[0];
     return first && first.result ? first.result : { ok: false, error: 'empty_result' };
   } catch (e) {
@@ -1523,7 +1584,7 @@ async function markTask(task) {
 
   const favicon = guard.error
     ? { ok: false, error: guard.error.error }
-    : await markFavicon(tab.id, BADGE_COLOR);
+    : await markFavicon(tab.id, BADGE_COLOR, task.ttlMs);
 
   if (!guard.error) {
     // ttl=0 表示常驻，直到显式清除
@@ -1557,26 +1618,42 @@ async function unmarkTask(task) {
     targets = [tab.id];
   } else {
     // 未指定目标时清除全部。
-    // 只处理仍然存在的标签页：对已关闭的标签页做注入会白等超时，
-    // 标记多时足以把整个任务拖到几十秒。
+    // 用 collectMarkedTabs 而非直接读内存：它同时按标题前缀发现残留标记，
+    // 这样即使扩展重载过、内存记录丢了，也能把页面上的标记清干净。
     const all = await chrome.tabs.query({});
     const alive = new Set(all.map((t) => t.id));
 
     for (const id of Array.from(markedTabs)) {
       if (!alive.has(id)) { markedTabs.delete(id); }
     }
-    targets = Array.from(markedTabs);
+
+    targets = (await collectMarkedTabs()).filter((id) => alive.has(id));
   }
 
-  for (const id of targets) {
-    await removeBadge(id);
-    await hideIndicator(id);
-  }
+  // 并行清除：串行时每个冻结标签页都会累积一次注入超时，
+  // 三个标签页就能把一次 unmark 拖到几十秒。并行后总耗时约等于单个最慢者。
+  const results = await Promise.allSettled(
+    targets.map(async (id) => {
+      await removeBadge(id);
+      const ok = await hideIndicator(id);
+      return { id, indicatorCleared: ok };
+    })
+  );
+
+  const failed = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
   await saveMarks();
 
   return {
     ok: true,
-    data: { cleared: targets, browser: BROWSER_NAME, markedCount: markedTabs.size }
+    data: {
+      cleared: targets,
+      browser: BROWSER_NAME,
+      markedCount: markedTabs.size,
+      // 冻结/无响应的标签页无法注入，标记要等它被打开或刷新后才能清掉
+      note: failed.length
+        ? `${failed.length} 个标签页无响应，其标记需在浏览器中打开或刷新该标签页后再清除`
+        : undefined
+    }
   };
 }
 
@@ -2191,6 +2268,45 @@ function bumpBootCount() {
       return chrome.storage.local.set({ 'abb-boot': s });
     }).catch(() => {});
   } catch (e) { /* 忽略 */ }
+}
+
+/**
+ * 供扩展弹窗调用的本地操作。
+ * 走消息而不是 HTTP，这样桥接服务没开时也能查看和清除标记。
+ */
+try {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== 'abb-popup') { return undefined; }
+
+    (async () => {
+      try {
+        if (msg.action === 'status') {
+          sendResponse({
+            ok: true,
+            browser: BROWSER_NAME,
+            version: chrome.runtime.getManifest().version,
+            markedCount: markedTabs.size,
+            markedTabs: Array.from(markedTabs)
+          });
+          return;
+        }
+
+        if (msg.action === 'clearMarks') {
+          const r = await unmarkTask({});
+          sendResponse({ ok: true, cleared: (r.data && r.data.cleared) || [] });
+          return;
+        }
+
+        sendResponse({ ok: false, error: 'unknown_action' });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+      }
+    })();
+
+    return true; // 异步响应
+  });
+} catch (e) {
+  logError('runtime.onMessage', e);
 }
 
 function bootstrap() {

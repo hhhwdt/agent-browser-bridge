@@ -558,6 +558,7 @@ async function handle(req, res) {
       frameId: typeof body.frameId === "number" ? body.frameId : undefined,
       text: body.text,
       color: body.color,
+      ttlMs: typeof body.ttlMs === 'number' ? body.ttlMs : undefined,
       all: !!body.all
     }, clampTimeout(body.timeoutMs));
 

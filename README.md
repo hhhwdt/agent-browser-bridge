@@ -164,17 +164,25 @@ are in use:
    (read = blue, click = green, type = amber, navigate = purple).
 2. **Title prefix** — a `🤖 ` prefix is added to the tab title.
 
-Both are reverted by `unmark`, and marks persist until cleared (or until the tab closes).
+Marks are cleared three ways:
 
-Note on the favicon: the link's `type` attribute **must** be updated to `image/png` when swapping
-in a PNG data URL. Leaving it as `image/x-icon` makes the browser fail to decode it and silently
-fall back to the original icon.
+1. **Automatically** — the injected page code schedules its own cleanup (10 minutes by default).
+   This matters because a frozen background tab cannot be injected into: a page-side timer fires
+   as soon as you switch back to that tab, so marks never become permanent residue.
+2. **From the toolbar** — click the extension icon and press **清除所有标记**.
+3. **From the CLI**:
 
 ```
 node read.js mark   --match "example.com/page" --text "processing"
 node read.js unmark --match "example.com/page"
 node read.js unmark                      # clear all
 ```
+
+Pass `ttlMs` to `mark` to change the auto-expire window (`0` = never expire).
+
+Note on the favicon: the link's `type` attribute **must** be updated to `image/png` when swapping
+in a PNG data URL. Leaving it as `image/x-icon` makes the browser fail to decode it and silently
+fall back to the original icon.
 
 ## Frame handling
 

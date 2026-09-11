@@ -117,6 +117,50 @@ document.getElementById('revokeAllBtn').addEventListener('click', async () => {
   await refreshOrigins();
 });
 
+/* ------------------------------------------------------------------ *
+ * 标签页标记
+ * 清除走后台服务脚本，它在页面内还原标题与图标；弹窗本身不直接注入。
+ * ------------------------------------------------------------------ */
+
+const markSummary = document.getElementById('markSummary');
+
+function sendToBackground(action) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'abb-popup', action }, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(resp || { ok: false, error: 'no_response' });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  });
+}
+
+async function refreshMarks() {
+  const r = await sendToBackground('status');
+  if (!r.ok) {
+    markSummary.textContent = '状态读取失败';
+    return;
+  }
+  markSummary.textContent = r.markedCount > 0
+    ? `已标记 ${r.markedCount} 个标签页`
+    : '当前没有标记';
+}
+
+document.getElementById('clearMarksBtn').addEventListener('click', async () => {
+  const r = await sendToBackground('clearMarks');
+  if (!r.ok) {
+    alert('清除失败：' + (r.error || '未知错误'));
+    return;
+  }
+  await refreshMarks();
+});
+
 refreshBridgeStatus();
 refreshOrigins();
+refreshMarks();
 setInterval(refreshBridgeStatus, 2000);

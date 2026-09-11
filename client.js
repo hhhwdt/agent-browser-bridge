@@ -329,6 +329,7 @@ class BrowserBridgeClient {
       tabId: options.tabId,
       frameId: options.frameId,
       text: options.text,
+      ttlMs: options.ttlMs,
       browser: options.browser
     }, options.timeoutMs);
   }
