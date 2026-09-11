@@ -1013,7 +1013,9 @@ function tabMarkInPage(opts) {
   // ---- 自动过期 ----
   // 页面侧定时器。后台标签页的定时器会被节流，但用户一旦切回该标签页就会触发，
   // 因此标记不会永久残留——这是"冻住的标签页清不掉"的兜底方案。
-  const ttlMs = typeof opts.ttlMs === 'number' ? opts.ttlMs : 10 * 60 * 1000;
+  // 默认 3 分钟：agent 的操作是连续的，每次操作都会重置计时，因此足够；
+  // 残留窗口更短，避免标签页看起来"一直被占用"。
+  const ttlMs = typeof opts.ttlMs === 'number' ? opts.ttlMs : 3 * 60 * 1000;
   cancelTimer();
   if (ttlMs > 0) {
     try {

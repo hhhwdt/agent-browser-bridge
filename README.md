@@ -167,7 +167,7 @@ are in use:
 
 Marks are cleared three ways:
 
-1. **Automatically** — the injected page code schedules its own cleanup (10 minutes by default).
+1. **Automatically** — the injected page code schedules its own cleanup (3 minutes by default).
    This matters because a frozen background tab cannot be injected into: a page-side timer fires
    as soon as you switch back to that tab, so marks never become permanent residue.
 2. **From the toolbar** — click the extension icon and press **清除所有标记**.
