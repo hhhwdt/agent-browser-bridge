@@ -22,7 +22,9 @@ function parseArgs(argv) {
   // 需要取值的选项；其余 --xxx 视为布尔开关
   const VALUE_OPTS = new Set([
     'match', 'url', 'tabId', 'frameId', 'browser', 'selector', 'text', 'href',
-    'value', 'key', 'index', 'port', 'timeout', 'host'
+    'value', 'key', 'index', 'port', 'timeout', 'host',
+    // eval / screenshot / session / upload / download 用
+    'code', 'file', 'out', 'format', 'name', 'key', 'header'
   ]);
 
   for (let i = 2; i < argv.length; i++) {
@@ -51,6 +53,32 @@ function usage() {
   node read.js read --match "<URL子串>" [--selector CSS] [--links] [--html] [--out 文件] [--json]
 
     --html  额外返回元素 outerHTML 与可编辑区域清单，用于定位选择器
+
+  node read.js eval --match "<URL子串>" (--code "<JS>" | --file 文件) [--frameId N] [--json]
+
+    在页面主世界执行 JS，用 return 返回结果。适合量 DOM、读计算样式，例如：
+    --code "const t=document.querySelector('.el-table'); return t && Math.round(t.getBoundingClientRect().width)"
+    返回的 DOM 节点会转成 {node,id,className,text,html}；整体超过 200KB 时截断并给出 json 片段。
+
+  node read.js screenshot --match "<URL子串>" [--out 文件] [--format png|jpeg] [--selector CSS] [--full]
+
+    默认走 CDP 截屏：后台标签页也能截，支持 --selector 只截某个元素、--full 截整页；
+    CDP 不可用时（如该标签页开着 DevTools）退避为扩展自带截屏（仅当前激活标签页）。
+    默认保存为 screenshot.png。
+
+  node read.js session --match "<URL子串>" [--name cookie名] [--key 存储键] [--local] [--session] [--storage false] [--json]
+
+    读取该标签页的登录态：cookies（含 httpOnly）+ localStorage / sessionStorage。
+    默认两处存储都读、值按 4000 字符截断；--name/--key 可只取指定项。
+
+  node read.js upload --match "<URL子串>" --file <绝对路径> [--file ...] [--selector CSS]
+
+    把本地文件塞进页面 file input（走 CDP，默认选择器 input[type=file]）。--file 可重复。
+
+  node read.js download --match "<URL子串>" --url <地址> [--out 文件] [--maxBytes N] [--header "名字: 值"]
+
+    用该标签页的登录态请求地址（同源自动带 cookie，可用 --header 追加 token 之类的头）并落盘；
+    默认上限 20MB，超限报 too_large。
 
   node read.js links --match "<URL子串>" [--text 关键字] [--selector CSS]
 
@@ -355,6 +383,156 @@ async function main() {
           console.log('\n--- 链接 ---');
           for (const l of data.links) { console.log(`${compact(l.text, 60)}\t${l.href}`); }
         }
+        return;
+      }
+
+      case 'eval': {
+        requireTarget(args);
+        let code = args.code;
+        if (!code && args.file) {
+          const fs = require('node:fs');
+          code = fs.readFileSync(args.file, 'utf8');
+        }
+        if (!code) {
+          console.error('缺少要执行的代码：用 --code "<JS>" 或 --file <文件>');
+          process.exitCode = 1;
+          return;
+        }
+
+        const data = await client.evalPage({
+          match: args.match,
+          url: args.url,
+          tabId: num(args.tabId),
+          frameId: num(args.frameId),
+          code,
+          browser: args.browser,
+          timeoutMs
+        });
+
+        if (args.json) {
+          console.log(JSON.stringify(data, null, 2));
+          return;
+        }
+        if (data.truncated) {
+          console.log('结果过大已截断（仅返回前 200KB 的 JSON）：');
+          console.log(data.json);
+          return;
+        }
+        console.log(typeof data.value === 'string' ? data.value : JSON.stringify(data.value, null, 2));
+        return;
+      }
+
+      case 'screenshot': {
+        requireTarget(args);
+        const data = await client.screenshot({
+          match: args.match,
+          url: args.url,
+          tabId: num(args.tabId),
+          frameId: num(args.frameId),
+          format: args.format,
+          selector: args.selector,
+          full: !!args.full,
+          browser: args.browser,
+          timeoutMs
+        });
+
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const out = args.out || 'screenshot.png';
+        const base64 = String(data.dataUrl || '').replace(/^data:image\/\w+;base64,/, '');
+        const buf = Buffer.from(base64, 'base64');
+        const dir = path.dirname(out);
+        if (dir && !fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+        fs.writeFileSync(out, buf);
+        console.log(`已保存截图: ${out}  (${data.width}x${data.height} ${data.format}, ${(buf.length / 1024).toFixed(0)} KB)`);
+        return;
+      }
+
+      case 'session': {
+        requireTarget(args);
+        const data = await client.session({
+          match: args.match,
+          url: args.url,
+          tabId: num(args.tabId),
+          name: args.name,
+          key: args.key,
+          local: args.local,
+          session: args.session,
+          storage: args.storage,
+          browser: args.browser,
+          timeoutMs
+        });
+        if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
+        if (data.cookies) {
+          console.log('--- cookies（' + data.cookies.length + ' 个）---');
+          for (const c of data.cookies) {
+            console.log('  ' + c.name + ' = ' + compact(c.value, 120)
+              + (c.httpOnly ? '  [httpOnly]' : '') + (c.domain ? '  @' + c.domain : ''));
+          }
+        }
+        for (const storeName of ['localStorage', 'sessionStorage']) {
+          const store = data.storage && data.storage[storeName];
+          if (!store) { continue; }
+          console.log('--- ' + storeName + '（' + Object.keys(store).length + ' 项）---');
+          for (const k of Object.keys(store)) {
+            console.log('  ' + k + ' = ' + compact(String(store[k]), 120));
+          }
+        }
+        if (data.cookiesError) { console.log('cookies 读取失败: ' + data.cookiesError); }
+        if (data.storageError) { console.log('本地存储读取失败: ' + data.storageError); }
+        return;
+      }
+
+      case 'upload': {
+        requireTarget(args);
+        const files = Array.isArray(args.file) ? args.file : (args.file ? [args.file] : []);
+        if (files.length === 0) {
+          console.error('缺少文件：用 --file <绝对路径> 指定，可重复多次');
+          process.exitCode = 1;
+          return;
+        }
+        const data = await client.upload({
+          match: args.match,
+          url: args.url,
+          tabId: num(args.tabId),
+          selector: args.selector,
+          files,
+          browser: args.browser,
+          timeoutMs
+        });
+        console.log('已选择文件: ' + (data.files || []).join(', ') + '  →  ' + data.selector);
+        return;
+      }
+
+      case 'download': {
+        requireTarget(args);
+        if (!args.url) {
+          console.error('缺少下载地址：用 --url <地址> 指定（建议同源地址，会自动带上登录态）');
+          process.exitCode = 1;
+          return;
+        }
+        const headerList = Array.isArray(args.header) ? args.header : (args.header ? [args.header] : []);
+        const headers = {};
+        for (const h of headerList) {
+          const i = String(h).indexOf(':');
+          if (i > 0) { headers[String(h).slice(0, i).trim()] = String(h).slice(i + 1).trim(); }
+        }
+        const data = await client.download({
+          match: args.match,
+          tabId: num(args.tabId),
+          url: args.url,
+          maxBytes: num(args.maxBytes),
+          headers: Object.keys(headers).length ? headers : undefined,
+          browser: args.browser,
+          timeoutMs
+        });
+        const fsMod = require('node:fs');
+        const pathMod = require('node:path');
+        const out = args.out || data.filename || 'download.bin';
+        const dir = pathMod.dirname(out);
+        if (dir && !fsMod.existsSync(dir)) { fsMod.mkdirSync(dir, { recursive: true }); }
+        fsMod.writeFileSync(out, Buffer.from(data.base64, 'base64'));
+        console.log('已保存: ' + out + '  (' + data.bytes + ' 字节, ' + (data.contentType || '未知类型') + ')');
         return;
       }
 

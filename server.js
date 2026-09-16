@@ -72,6 +72,11 @@ const API_VERSION = '1.0';
 const CAPABILITIES = [
   'tabs',         // 列出标签页
   'read',         // 读取正文
+  'eval',         // 在页面里执行 JS 并取回结果（量 DOM、取计算样式）
+  'session',      // 读取标签页登录态（cookies + localStorage/sessionStorage）
+  'upload',       // 把本地文件塞进页面 file input（CDP）
+  'download',     // 用页面登录态下载文件
+  'screenshot',   // 截取当前可见标签页画面
   'links',        // 枚举链接
   'click',        // 点击元素
   'type',         // 输入文本
@@ -582,6 +587,183 @@ async function handle(req, res) {
   }
 
   // ---- 读取页面 ----
+  if (req.method === 'POST' && path === '/eval') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+
+    if (!extensionConnected()) {
+      sendJson(res, 503, { ok: false, error: 'extension_not_connected' }, req);
+      return;
+    }
+
+    if (!body.match && !body.url && typeof body.tabId !== 'number') {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'missing_target',
+        hint: '需要提供 match、url 或 tabId 之一'
+      }, req);
+      return;
+    }
+
+    if (typeof body.code !== 'string' || !body.code.trim()) {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'missing_code',
+        hint: '需要提供要执行的 JS 代码，用 return 返回结果，例如 --code "return document.title"'
+      }, req);
+      return;
+    }
+
+    const result = await dispatch({
+      action: 'eval',
+      browser: body.browser,
+      match: body.match,
+      url: body.url,
+      tabId: body.tabId,
+      frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
+      code: body.code
+    }, clampTimeout(body.timeoutMs));
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  if (req.method === 'POST' && path === '/session') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+    if (!extensionConnected()) {
+      sendJson(res, 503, { ok: false, error: 'extension_not_connected' }, req);
+      return;
+    }
+    if (!body.match && !body.url && typeof body.tabId !== 'number') {
+      sendJson(res, 400, { ok: false, error: 'missing_target', hint: '需要提供 match、url 或 tabId 之一' }, req);
+      return;
+    }
+    const result = await dispatch({
+      action: 'session',
+      browser: body.browser,
+      match: body.match,
+      url: body.url,
+      tabId: body.tabId,
+      name: body.name,
+      key: body.key,
+      local: body.local,
+      session: body.session,
+      storage: body.storage
+    }, clampTimeout(body.timeoutMs, 15000));
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  if (req.method === 'POST' && path === '/upload') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+    if (!extensionConnected()) {
+      sendJson(res, 503, { ok: false, error: 'extension_not_connected' }, req);
+      return;
+    }
+    if (!body.match && !body.url && typeof body.tabId !== 'number') {
+      sendJson(res, 400, { ok: false, error: 'missing_target', hint: '需要提供 match、url 或 tabId 之一' }, req);
+      return;
+    }
+    const result = await dispatch({
+      action: 'upload',
+      browser: body.browser,
+      match: body.match,
+      url: body.url,
+      tabId: body.tabId,
+      selector: body.selector,
+      files: body.files
+    }, clampTimeout(body.timeoutMs, 30000));
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  if (req.method === 'POST' && path === '/download') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+    if (!extensionConnected()) {
+      sendJson(res, 503, { ok: false, error: 'extension_not_connected' }, req);
+      return;
+    }
+    if (!body.match && !body.url && typeof body.tabId !== 'number') {
+      sendJson(res, 400, { ok: false, error: 'missing_target', hint: '需要提供 match、url 或 tabId 之一' }, req);
+      return;
+    }
+    if (!body.url) {
+      sendJson(res, 400, { ok: false, error: 'missing_url', hint: '用 --url 指定要下载的地址' }, req);
+      return;
+    }
+    const result = await dispatch({
+      action: 'download',
+      browser: body.browser,
+      match: body.match,
+      tabId: body.tabId,
+      url: body.url,
+      maxBytes: body.maxBytes,
+      headers: body.headers
+    }, clampTimeout(body.timeoutMs, 60000));
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  if (req.method === 'POST' && path === '/screenshot') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+
+    if (!extensionConnected()) {
+      sendJson(res, 503, { ok: false, error: 'extension_not_connected' }, req);
+      return;
+    }
+
+    if (!body.match && !body.url && typeof body.tabId !== 'number') {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'missing_target',
+        hint: '需要提供 match、url 或 tabId 之一'
+      }, req);
+      return;
+    }
+
+    const result = await dispatch({
+      action: 'screenshot',
+      browser: body.browser,
+      match: body.match,
+      url: body.url,
+      tabId: body.tabId,
+      frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
+      format: body.format,
+      selector: body.selector,
+      full: !!body.full
+    }, clampTimeout(body.timeoutMs, 30000));
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
   if (req.method === 'POST' && path === '/read') {
     let body;
     try {

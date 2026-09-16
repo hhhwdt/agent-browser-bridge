@@ -1100,6 +1100,15 @@ const INJECT_TIMEOUT_MS = 12000;
 /** 视觉标记类注入的预算。标记是锦上添花，遇到冻结标签页不值得久等。 */
 const MARK_INJECT_TIMEOUT_MS = 4000;
 
+/** session 动作里单个 cookie 值的截断长度。 */
+const SESSION_VALUE_MAX = 2000;
+
+/** download 动作的默认大小上限（字节），超过直接报 too_large。 */
+const DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
+
+/** eval 动作返回值的 JSON 上限，超过则截断并置 truncated=true。 */
+const EVAL_MAX_JSON = 200 * 1024;
+
 /** 给 Promise 加超时。用于包装可能永不返回的浏览器 API 调用。 */
 function withTimeout(promise, ms, label) {
   let timer = null;
@@ -1760,6 +1769,606 @@ async function readTab(task) {
   };
 }
 
+/**
+ * 在页面里执行一段 JS（在页面主世界跑间接 eval），把结果整理成可序列化的结构。
+ * 只保留能跨进程传递的值：DOM 节点转成 node/id/className/text/html，超长内容截断。
+ */
+async function evalInPage(code) {
+  function normalize(v, depth) {
+    const d = depth || 0;
+    if (v === undefined || v === null) { return null; }
+    const t = typeof v;
+    if (t === 'string') { return v.length > 4000 ? v.slice(0, 4000) + '…[截断]' : v; }
+    if (t === 'number' || t === 'boolean') { return v; }
+    if (t === 'bigint') { return String(v); }
+    if (t === 'function') { return '[function]'; }
+    if (t === 'symbol') { return String(v); }
+    if (d > 4) { return '[deep]'; }
+    if (typeof Node !== 'undefined' && v instanceof Node) {
+      return {
+        node: v.nodeName,
+        id: v.id || null,
+        className: typeof v.className === 'string' ? v.className : null,
+        text: (v.textContent || '').slice(0, 300),
+        html: v.nodeType === 1 ? v.outerHTML.slice(0, 1000) : null
+      };
+    }
+    if (Array.isArray(v)) { return v.slice(0, 200).map(function (x) { return normalize(x, d + 1); }); }
+    if (typeof Map !== 'undefined' && v instanceof Map) { return normalize(Array.from(v.entries()), d + 1); }
+    if (typeof Set !== 'undefined' && v instanceof Set) { return normalize(Array.from(v), d + 1); }
+    const out = {};
+    let n = 0;
+    for (const k of Object.keys(v)) {
+      if (n++ >= 200) { out.__truncated = true; break; }
+      try { out[k] = normalize(v[k], d + 1); } catch (e) { out[k] = '[unserializable]'; }
+    }
+    return out;
+  }
+
+  let value;
+  try {
+    // 函数体语义：支持在代码里直接 return（函数体本身仍在全局作用域求值，能访问 document 等）
+    value = new Function(code)();
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      // 兼容直接写表达式的用法，例如 "document.title"
+      try {
+        value = (0, eval)(code);
+      } catch (e2) {
+        return { ok: false, evalError: String(e2 && e2.message ? e2.message : e2) };
+      }
+    } else {
+      return { ok: false, evalError: String(e && e.message ? e.message : e) };
+    }
+  }
+
+  // 代码没写 return 时（例如只写了一个表达式），按表达式取完成值
+  if (value === undefined) {
+    try { value = (0, eval)(code); } catch (e) { /* 忽略，保持 undefined */ }
+  }
+
+  // 允许代码返回 Promise（例如等接口返回后再取数据）
+  if (value && typeof value.then === 'function') {
+    try {
+      value = await value;
+    } catch (e) {
+      return { ok: false, evalError: String(e && e.message ? e.message : e) };
+    }
+  }
+  return { ok: true, value: normalize(value) };
+}
+
+/** 在目标标签页里执行一段 JS，返回可序列化结果（量 DOM、取计算样式用）。 */
+async function evalTab(task) {
+  const tab = await resolveTab(task);
+  const guard = await ensureInjectable(tab);
+  if (guard.error) { return guard.error; }
+  if (!task.code || typeof task.code !== 'string') {
+    return {
+      ok: false,
+      error: 'missing_code',
+      hint: '用法：eval --match "<URL子串>" --code "<JS>"；用 return 返回结果，例如 return document.title'
+    };
+  }
+
+  // 注入主世界：能访问页面自身的全局对象；同时避开扩展隔离世界的 CSP 限制
+  // （页面若自带严格 CSP 仍可能拦 eval，这种情况会返回 eval_error 并说明原因）
+  const target = typeof task.frameId === 'number'
+    ? { tabId: tab.id, frameIds: [task.frameId] }
+    : { tabId: tab.id, allFrames: true };
+
+  let injection;
+  try {
+    injection = await withTimeout(
+      chrome.scripting.executeScript({ target, func: evalInPage, args: [task.code], world: 'MAIN' }),
+      INJECT_TIMEOUT_MS
+    );
+  } catch (e) {
+    return { ...tabUnresponsive(e, tab.id), url: tab.url };
+  }
+
+  const frames = (injection || []).map((r) => ({
+    frameId: r.frameId,
+    error: r.error ? (r.error.message || String(r.error)) : null,
+    result: r.result || null
+  }));
+  if (frames.length === 0) {
+    return { ok: false, error: 'no_injection_result', url: tab.url };
+  }
+
+  // 主框架优先；页面脚本抛错的结果排在最后
+  const score = (f) => (f.error ? -1 : (f.result && f.result.evalError ? 0 : (f.frameId === 0 ? 100 : 1)));
+  let best = frames[0];
+  let bestScore = -Infinity;
+  for (const f of frames) {
+    const s = score(f);
+    if (s > bestScore) { bestScore = s; best = f; }
+  }
+
+  if (best.error) {
+    return { ok: false, error: 'page_script_error', message: best.error, url: tab.url, frameId: best.frameId };
+  }
+  const picked = { data: best.result, frameId: best.frameId, frameCount: frames.length };
+  const data = picked.data;
+  if (data && data.evalError) {
+    return { ok: false, error: 'eval_error', message: data.evalError, url: tab.url, frameId: picked.frameId };
+  }
+
+  const value = data ? data.value : null;
+  let json = '';
+  try { json = JSON.stringify(value); } catch (e) { json = JSON.stringify(String(value)); }
+  const truncated = json.length > EVAL_MAX_JSON;
+  return {
+    ok: true,
+    data: {
+      tabId: tab.id,
+      wasActive: !!tab.active,
+      frameId: picked.frameId,
+      frameCount: picked.frameCount,
+      url: tab.url,
+      truncated,
+      value: truncated ? null : value,
+      json: truncated ? json.slice(0, EVAL_MAX_JSON) : null
+    }
+  };
+}
+
+/** 截取目标标签页当前可见画面。扩展 API 只能截「当前激活」的标签页，不主动切标签。 */
+async function screenshotTab(task) {
+  const tab = await resolveTab(task);
+  if (!tab || typeof tab.id !== 'number') {
+    return { ok: false, error: 'no_tab_matched', hint: '没有找到匹配的标签页，可用 tabs 查看当前所有标签页' };
+  }
+  const guard = await ensureInjectable(tab);
+  if (guard.error) { return guard.error; }
+
+  const format = task.format === 'jpeg' ? 'jpeg' : 'png';
+
+  // 首选方式走 CDP，需要 debugger 可选权限；未授予时下面会回退到 DOM 方案，
+  // 因此这里只探测、不直接失败。
+  const cdpPerm = await requireOptionalPermissions(['debugger']);
+  const cdpAllowed = !cdpPerm;
+
+  // 元素截图：先量出元素在页面坐标里的矩形
+  let clip = null;
+  if (task.selector) {
+    clip = await elementRect(tab.id, task.selector, typeof task.frameId === 'number' ? task.frameId : 0);
+    if (!clip) {
+      return { ok: false, error: 'element_not_found', selector: task.selector, url: tab.url };
+    }
+  }
+
+  // 首选 CDP：能截后台标签页、整页和指定元素（中途会短暂附加调试器）
+  try {
+    if (!cdpAllowed) {
+      // 未授予 debugger 权限时直接走退避方案，不必先撞一次异常
+      throw new Error('debugger 权限未授予，跳过 CDP');
+    }
+    const cdp = await captureByCdp(tab.id, format, clip, !!task.full || !!clip);
+    return {
+      ok: true,
+      data: {
+        tabId: tab.id,
+        url: tab.url,
+        width: cdp.width || tab.width || null,
+        height: cdp.height || tab.height || null,
+        format,
+        via: 'cdp',
+        selector: task.selector || null,
+        fullPage: !!task.full,
+        dataUrl: cdp.dataUrl
+      }
+    };
+  } catch (e) {
+    const message = String(e && e.message ? e.message : e);
+
+    // 退避：CDP 不可用时改用扩展自带截屏，但它只能截当前可见标签页
+    if (!tab.active) {
+      // 区分"没授权"和"CDP 用不了"，否则提示会把人引向错误的方向
+      if (!cdpAllowed) {
+        return {
+          ok: false,
+          error: 'permission_not_granted',
+          missing: ['debugger'],
+          url: tab.url,
+          hint: '后台标签页的截图需要 debugger 权限（CDP）。'
+            + '请点击扩展图标，在弹窗中「授予高级权限」后重试；'
+            + '或先把该标签页切到前台，用扩展自带的截屏退避方案。'
+        };
+      }
+      return {
+        ok: false,
+        error: 'capture_failed',
+        url: tab.url,
+        message,
+        hint: 'CDP 截屏失败且该标签页不是激活状态（扩展自带截屏只能截当前可见标签页）。'
+          + '可先关掉该标签页的 DevTools，或让该页面在前台后重试。'
+      };
+    }
+    try {
+      const dataUrl = await withTimeout(
+        chrome.tabs.captureVisibleTab(tab.windowId, { format }),
+        15000
+      );
+      return {
+        ok: true,
+        data: {
+          tabId: tab.id,
+          url: tab.url,
+          width: tab.width || null,
+          height: tab.height || null,
+          format,
+          via: 'captureVisibleTab',
+          selector: null,
+          fullPage: false,
+          note: clip ? '元素截图不支持退避方案，已返回可视区域整屏' : undefined,
+          dataUrl
+        }
+      };
+    } catch (e2) {
+      return {
+        ok: false,
+        error: 'capture_failed',
+        url: tab.url,
+        message: String(e2 && e2.message ? e2.message : e2),
+        cdpMessage: message
+      };
+    }
+  }
+}
+
+/**
+ * 读取目标标签页的登录态：cookies（含 httpOnly，走 chrome.cookies）+ localStorage / sessionStorage。
+ *
+ * 用途：默认复用浏览器里已经在用的登录态做操作，不必重新登录。
+ * 只按需返回：--name 过滤 cookie 名，--key 过滤存储键，长值截断，避免把整站数据倒出来。
+ */
+/**
+ * 检查可选权限是否已授予。
+ *
+ * debugger 与 cookies 属于可选权限（可选权限不会在安装时强制索取，
+ * 由用户在扩展弹窗中按需授予），因此调用前必须先确认，否则 API 直接抛错。
+ */
+async function requireOptionalPermissions(names) {
+  const needed = [];
+  for (const n of names) {
+    try {
+      const has = await chrome.permissions.contains({ permissions: [n] });
+      if (!has) { needed.push(n); }
+    } catch (e) {
+      needed.push(n);
+    }
+  }
+  if (needed.length === 0) { return null; }
+
+  return {
+    ok: false,
+    error: 'permission_not_granted',
+    missing: needed,
+    hint: `该操作需要额外权限（${needed.join('、')}）。请点击扩展图标，在弹窗中授予后再试。`
+  };
+}
+
+async function sessionTab(task) {
+  const tab = await resolveTab(task);
+  if (!tab || typeof tab.id !== 'number') {
+    return { ok: false, error: 'no_tab_matched', hint: '没有找到匹配的标签页，可用 tabs 查看当前所有标签页' };
+  }
+
+  // 读取 Cookie 需要 cookies 可选权限，未授予时直接给出可操作的提示
+  const permErr = await requireOptionalPermissions(['cookies']);
+  if (permErr) { return permErr; }
+
+  const result = {
+    tabId: tab.id,
+    url: tab.url,
+    cookies: null,
+    storage: null
+  };
+
+  // cookies：按标签页 URL 取，带 httpOnly 的也能拿到
+  try {
+    const all = await withTimeout(
+      chrome.cookies.getAll({ url: tab.url, name: task.name || undefined }),
+      10000
+    );
+    result.cookies = (all || []).map((c) => ({
+      name: c.name,
+      value: truncate(c.value, SESSION_VALUE_MAX),
+      domain: c.domain,
+      path: c.path,
+      secure: !!c.secure,
+      httpOnly: !!c.httpOnly,
+      session: !!c.session,
+      expirationDate: c.expirationDate || null
+    }));
+  } catch (e) {
+    result.cookiesError = String(e && e.message ? e.message : e);
+  }
+
+  // 页面本地存储
+  if (task.storage !== false) {
+    const guard = await ensureInjectable(tab);
+    if (guard.error) {
+      result.storageError = guard.error.error || 'not_injectable';
+    } else {
+      const picked = await injectAndPick(
+        tab.id,
+        readStorageInPage,
+        [task.local !== false, task.session !== false, task.key || null],
+        (r, frameId) => (r ? (frameId === 0 ? 1 : 0) : -1)
+      );
+      if (picked.error) {
+        result.storageError = picked.error.error || 'inject_failed';
+      } else {
+        result.storage = picked.data || null;
+      }
+    }
+  }
+
+  return { ok: true, data: result };
+}
+
+/** 页面侧：读取 localStorage / sessionStorage（可按 key 过滤，长值截断）。 */
+function readStorageInPage(includeLocal, includeSession, key) {
+  const MAX = 4000;
+
+  function dump(store) {
+    const out = {};
+    if (key) {
+      out[key] = store.getItem(key);
+      return out;
+    }
+    const len = Math.min(store.length, 300);
+    for (let i = 0; i < len; i++) {
+      const k = store.key(i);
+      out[k] = store.getItem(k);
+    }
+    for (const k of Object.keys(out)) {
+      if (typeof out[k] === 'string' && out[k].length > MAX) {
+        out[k] = out[k].slice(0, MAX) + '…[截断]';
+      }
+    }
+    return out;
+  }
+
+  const result = {};
+  if (includeLocal) {
+    try { result.localStorage = dump(window.localStorage); } catch (e) { result.localStorageError = String(e); }
+  }
+  if (includeSession) {
+    try { result.sessionStorage = dump(window.sessionStorage); } catch (e) { result.sessionStorageError = String(e); }
+  }
+  return result;
+}
+
+/**
+ * 把本地文件塞进页面的 file input（走 CDP DOM.setFileInputFiles）。
+ *
+ * 扩展自身读不到任意路径的文件，只能让浏览器去读，因此必须走调试器；期间会短暂 attach。
+ */
+async function uploadTab(task) {
+  const tab = await resolveTab(task);
+  if (!tab || typeof tab.id !== 'number') {
+    return { ok: false, error: 'no_tab_matched', hint: '没有找到匹配的标签页，可用 tabs 查看当前所有标签页' };
+  }
+  const files = Array.isArray(task.files) ? task.files.filter(Boolean) : [];
+  if (files.length === 0) {
+    return { ok: false, error: 'missing_files', hint: '用 --file <绝对路径> 指定要上传的文件，可重复多次' };
+  }
+
+  // 走 CDP 需要 debugger 可选权限
+  const permErr = await requireOptionalPermissions(['debugger']);
+  if (permErr) { return permErr; }
+
+  const selector = task.selector || 'input[type=file]';
+  const target = { tabId: tab.id };
+
+  try {
+    await chrome.debugger.attach(target, '1.3');
+  } catch (e) {
+    return {
+      ok: false,
+      error: 'cdp_attach_failed',
+      message: String(e && e.message ? e.message : e),
+      hint: '该标签页可能开着 DevTools（一个标签页同时只能有一个调试器），关掉 DevTools 再试。'
+    };
+  }
+
+  try {
+    const doc = await chrome.debugger.sendCommand(target, 'DOM.getDocument', { depth: -1 });
+    const found = await chrome.debugger.sendCommand(target, 'DOM.querySelector', {
+      nodeId: doc.root.nodeId,
+      selector
+    });
+    if (!found || !found.nodeId) {
+      return { ok: false, error: 'element_not_found', selector, url: tab.url };
+    }
+    await chrome.debugger.sendCommand(target, 'DOM.setFileInputFiles', {
+      files,
+      nodeId: found.nodeId
+    });
+    return {
+      ok: true,
+      data: {
+        tabId: tab.id,
+        url: tab.url,
+        selector,
+        files: files.map((p) => String(p).split(/[\\/]/).pop())
+      }
+    };
+  } catch (e) {
+    return { ok: false, error: 'upload_failed', message: String(e && e.message ? e.message : e), url: tab.url };
+  } finally {
+    try { await chrome.debugger.detach(target); } catch (e) { /* 忽略 */ }
+  }
+}
+
+/**
+ * 用目标标签页的登录态下载文件：在页面里带 credentials 请求，再回传 base64。
+ *
+ * 这样下载的是「该登录用户能拿到的内容」，不需要在本地重新登录。
+ */
+async function downloadTab(task) {
+  const tab = await resolveTab(task);
+  if (!tab || typeof tab.id !== 'number') {
+    return { ok: false, error: 'no_tab_matched', hint: '没有找到匹配的标签页，可用 tabs 查看当前所有标签页' };
+  }
+  if (!task.url) {
+    return { ok: false, error: 'missing_url', hint: '用 --url <地址> 指定要下载的地址（同源地址会自动带上登录态）' };
+  }
+  const guard = await ensureInjectable(tab);
+  if (guard.error) { return guard.error; }
+
+  const maxBytes = Number(task.maxBytes) > 0 ? Number(task.maxBytes) : DOWNLOAD_MAX_BYTES;
+  const picked = await injectAndPick(
+    tab.id,
+    fetchInPage,
+    [task.url, maxBytes, task.headers || null],
+    (r, frameId) => (r ? (frameId === 0 ? 1 : 0) : -1)
+  );
+  if (picked.error) { return { ...picked.error, url: tab.url }; }
+
+  const data = picked.data || {};
+  if (data.error) {
+    return { ok: false, error: data.error, bytes: data.bytes || null, url: task.url, tabId: tab.id };
+  }
+  return {
+    ok: true,
+    data: {
+      tabId: tab.id,
+      pageUrl: tab.url,
+      url: task.url,
+      filename: filenameFromDisposition(data.disposition) || filenameFromUrl(task.url),
+      contentType: data.contentType || null,
+      bytes: data.bytes,
+      base64: data.base64
+    }
+  };
+}
+
+/** 页面侧：带 cookie 请求目标地址，返回 base64（超过上限直接报 too_large，避免把内存撑爆）。 */
+function fetchInPage(url, maxBytes, headers) {
+  return fetch(url, { credentials: 'include', redirect: 'follow', headers: headers || undefined })
+    .then(function (res) {
+      if (!res.ok) { return { error: 'http_' + res.status }; }
+      return res.arrayBuffer().then(function (buf) {
+        const bytes = new Uint8Array(buf);
+        if (bytes.length > maxBytes) { return { error: 'too_large', bytes: bytes.length }; }
+        let bin = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+        }
+        return {
+          base64: btoa(bin),
+          bytes: bytes.length,
+          contentType: res.headers.get('content-type'),
+          disposition: res.headers.get('content-disposition')
+        };
+      });
+    })
+    .catch(function (e) { return { error: String(e && e.message ? e.message : e) }; });
+}
+
+/** 从 Content-Disposition 里取文件名（兼容 filename* 与 filename）。 */
+function filenameFromDisposition(disposition) {
+  if (!disposition) { return null; }
+  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition);
+  if (star && star[1]) {
+    try { return decodeURIComponent(star[1].trim().replace(/^"|"$/g, '')); } catch (e) { /* 忽略 */ }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain && plain[1] ? plain[1].trim() : null;
+}
+
+/** 从 URL 末段推一个文件名。 */
+function filenameFromUrl(url) {
+  try {
+    const path = new URL(url).pathname;
+    const name = path.split('/').filter(Boolean).pop();
+    return name || 'download.bin';
+  } catch (e) {
+    return 'download.bin';
+  }
+}
+
+/** 字符串截断，用于 session 返回的长值。 */
+function truncate(value, max) {
+  const s = value == null ? '' : String(value);
+  return s.length > max ? s.slice(0, max) + '…[截断]' : s;
+}
+
+/**
+ * 通过 CDP 截屏（支持后台标签页、整页、元素区域）。
+ * 期间会短暂 attach 调试器，结束后立即 detach。
+ */
+async function captureByCdp(tabId, format, clip, beyondViewport) {
+  const target = { tabId };
+  await chrome.debugger.attach(target, '1.3');
+  try {
+    const params = { format, captureBeyondViewport: !!beyondViewport };
+    if (clip) {
+      params.clip = clip;
+    }
+    const shot = await withTimeout(
+      chrome.debugger.sendCommand(target, 'Page.captureScreenshot', params),
+      20000
+    );
+    if (!shot || !shot.data) {
+      throw new Error('empty_screenshot');
+    }
+    // 顺带取一下页面实际尺寸，便于调用方判断
+    let metrics = null;
+    try {
+      metrics = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics');
+    } catch (e) { /* 忽略 */ }
+    const content = metrics && metrics.cssContentSize ? metrics.cssContentSize : null;
+    // 整页截图才有意义报内容尺寸；否则报视口尺寸，避免误导
+    const showContentSize = !!beyondViewport;
+    return {
+      dataUrl: 'data:image/' + format + ';base64,' + shot.data,
+      width: clip ? Math.round(clip.width) : (showContentSize && content ? Math.round(content.width) : null),
+      height: clip ? Math.round(clip.height) : (showContentSize && content ? Math.round(content.height) : null)
+    };
+  } finally {
+    try { await chrome.debugger.detach(target); } catch (e) { /* 忽略 */ }
+  }
+}
+
+/** 量出元素在页面坐标里的矩形（供 CDP clip 使用），找不到返回 null。 */
+async function elementRect(tabId, selector, frameId) {
+  try {
+    const injection = await withTimeout(
+      chrome.scripting.executeScript({
+        target: typeof frameId === 'number' ? { tabId, frameIds: [frameId] } : { tabId, allFrames: true },
+        func: rectInPage,
+        args: [selector]
+      }),
+      INJECT_TIMEOUT_MS
+    );
+    const hit = (injection || []).find((r) => r.result);
+    return hit ? hit.result : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 页面侧：返回元素相对页面左上角的矩形（含滚动偏移）。 */
+function rectInPage(selector) {
+  const el = document.querySelector(selector);
+  if (!el) { return null; }
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) { return null; }
+  return {
+    x: r.left + window.scrollX,
+    y: r.top + window.scrollY,
+    width: r.width,
+    height: r.height,
+    scale: 1
+  };
+}
+
 /** 枚举目标标签页里的链接。 */
 async function linksTab(task) {
   const tab = await resolveTab(task);
@@ -2058,6 +2667,16 @@ async function runAction(task) {
       return await listTabs();
     case 'read':
       return await readTab(task);
+    case 'eval':
+      return await evalTab(task);
+    case 'screenshot':
+      return await screenshotTab(task);
+    case 'session':
+      return await sessionTab(task);
+    case 'upload':
+      return await uploadTab(task);
+    case 'download':
+      return await downloadTab(task);
     case 'links':
       return await linksTab(task);
     case 'frames':

@@ -75,6 +75,20 @@
   </div>
 
   <hr />
+
+  <div class="muted">高级能力（默认关闭，需单独授予）：</div>
+  <ul id="advList"><li>读取中…</li></ul>
+  <div class="row">
+    <button id="grantAdvBtn" class="primary">授予高级权限</button>
+    <button id="revokeAdvBtn">撤销高级权限</button>
+  </div>
+  <div class="muted">
+    授予后解锁：<b>session</b>（读取登录 Cookie 与站点存储）、
+    <b>screenshot</b> 的元素/整页截图、<b>upload</b>（向文件选择框填入本地文件）。
+    未授予时这些动作会返回明确提示，其余功能不受影响。
+  </div>
+
+  <hr />
   <div class="muted">
     只连接本机 127.0.0.1，不访问外部网络。可读页面内容并在授权范围内点击、输入。
   </div>

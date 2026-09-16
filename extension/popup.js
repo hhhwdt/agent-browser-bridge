@@ -17,10 +17,18 @@ const DEFAULT_ORIGINS = [
   'http://localhost:18777/*'
 ];
 
+// 高级能力所需的可选权限。默认不授予，避免安装时索取过宽权限。
+const ADV_PERMISSIONS = ['debugger', 'cookies'];
+const ADV_LABELS = {
+  debugger: 'debugger — 元素/整页截图、向文件选择框填入本地文件',
+  cookies: 'cookies — 读取站点登录 Cookie'
+};
+
 const bridgeDot = document.getElementById('bridgeDot');
 const bridgeStatus = document.getElementById('bridgeStatus');
 const originList = document.getElementById('originList');
 const originInput = document.getElementById('originInput');
+const advList = document.getElementById('advList');
 
 /** 规范化用户输入的站点，返回可授权的 origin 模式。 */
 function toOriginPattern(raw) {
@@ -80,6 +88,39 @@ async function refreshOrigins() {
     origins.forEach(addItem);
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * 高级能力权限
+ * 浏览器要求权限请求必须由用户手势触发，所以只能在这个弹窗里完成，
+ * 后台服务脚本无法代为申请。
+ * ------------------------------------------------------------------ */
+
+async function refreshAdvancedPermissions() {
+  const granted = await chrome.permissions.getAll();
+  const perms = granted.permissions || [];
+
+  advList.innerHTML = '';
+  for (const p of ADV_PERMISSIONS) {
+    const li = document.createElement('li');
+    const has = perms.includes(p);
+    li.textContent = (has ? '✓ ' : '✗ ') + (ADV_LABELS[p] || p);
+    li.style.color = has ? '#1a7f37' : '#656d76';
+    advList.appendChild(li);
+  }
+}
+
+document.getElementById('grantAdvBtn').addEventListener('click', async () => {
+  const ok = await chrome.permissions.request({ permissions: ADV_PERMISSIONS });
+  if (!ok) {
+    alert('未获得授权。');
+  }
+  await refreshAdvancedPermissions();
+});
+
+document.getElementById('revokeAdvBtn').addEventListener('click', async () => {
+  await chrome.permissions.remove({ permissions: ADV_PERMISSIONS });
+  await refreshAdvancedPermissions();
+});
 
 async function grant(pattern) {
   if (!pattern) {
@@ -163,4 +204,5 @@ document.getElementById('clearMarksBtn').addEventListener('click', async () => {
 refreshBridgeStatus();
 refreshOrigins();
 refreshMarks();
+refreshAdvancedPermissions();
 setInterval(refreshBridgeStatus, 2000);

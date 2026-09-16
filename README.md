@@ -51,6 +51,20 @@ It also handles the awkward realities of real sites: cross-frame editors (TinyMC
 | `diag` | Extension runtime diagnostics: version, polling, SW restarts, errors |
 | Multi-browser | Chrome and Edge run side by side, fully isolated, with automatic routing |
 
+### Advanced capabilities (opt-in)
+
+These require extra permissions that are **not** requested at install time. Enable them from the
+extension popup ("授予高级权限"); until then they return `permission_not_granted` and nothing else
+is affected.
+
+| Capability | Permission | Notes |
+|---|---|---|
+| `eval` | — | Run JavaScript in the page and get the result back |
+| `session` | `cookies` | Read the tab's cookies (including httpOnly) plus localStorage/sessionStorage |
+| `screenshot` | `debugger` | Element / full-page / background-tab capture via CDP; falls back to visible-tab capture without it |
+| `upload` | `debugger` | Put local files into a file input via CDP `DOM.setFileInputFiles` |
+| `download` | — | Fetch a URL with the page's login state and return the bytes as base64 |
+
 ## Requirements
 
 - Node.js 18+
@@ -83,6 +97,10 @@ operate on — either one hostname at a time, or "authorize all sites".
 The extension requests no host permission up front; access is granted through the browser's own
 permission prompt, so you stay in control.
 
+The same popup has a separate **授予高级权限 / Grant advanced permissions** button for the opt-in
+capabilities above. Only the core permissions (`tabs`, `scripting`, `storage`, `alarms`) are
+requested at install time, so the install prompt stays minimal.
+
 ## Usage
 
 ### CLI
@@ -95,6 +113,13 @@ node read.js click --match "example.com/page" --text "Next page"
 node read.js type  --match "example.com/page" --value "hello"
 node read.js wait  --match "example.com/page" --selector "#editor"
 node read.js navigate --url "https://example.com/other"
+
+# advanced (need opt-in permissions)
+node read.js eval       --match "example.com/page" --code "document.title"
+node read.js screenshot --match "example.com/page" --out shot.png --selector "table"
+node read.js session    --match "example.com/page" --name SESSION
+node read.js upload     --match "example.com/page" --file /path/to/report.pdf
+node read.js download   --match "example.com/page" --url "/export.csv" --out data.csv
 ```
 
 ### Client library
@@ -228,10 +253,19 @@ in turn and uses the one that actually contains the matching tab.
 - Binds to `127.0.0.1` only. No LAN or internet exposure.
 - Validates the `Origin` header and rejects requests from ordinary web pages, preventing a
   malicious site from driving the extension via CSRF.
-- Site access is enforced by the browser's permission system and is **denied by default**.
+- Site access is enforced by the browser's permission system and is **denied by default**. The
+  install manifest requests no host permissions beyond the local bridge.
+- **Privileged capabilities are opt-in and off by default.** `session` (cookie/storage reading),
+  `upload` and CDP screenshots need `cookies` / `debugger`, which are declared as *optional*
+  permissions and only requested when you press the button in the popup. Until granted, those
+  actions fail with `permission_not_granted`.
 - Read operations have no side effects. Write operations are risk-classified and logged back to the
   caller with what was actually clicked or typed.
-- No telemetry, no external network calls, no cookie or credential extraction.
+- No telemetry and no external network calls. The only outbound request is `download`, which fetches
+  the URL *you* pass, with the tab's login state; `eval` runs the code *you* pass.
+- Because `eval`, `session` and `download` hand you powerful primitives, treat anything that can
+  reach the local bridge (any local process) as able to use them once granted. Bind carefully and do
+  not expose port 18777 beyond loopback.
 - `type` with `method: 'html'` sanitizes input: strips `script`/`iframe`/`style`, `on*` handlers and
   `javascript:` URLs.
 

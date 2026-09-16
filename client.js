@@ -177,6 +177,81 @@ class BrowserBridgeClient {
   // ---- 读取类 ----
 
   /**
+   * 在目标标签页里执行一段 JS 并取回结果（量 DOM、读计算样式等自动化验证用）。
+   * 代码在页面主世界执行，用 return 返回结果；DOM 节点会被转成
+   * {node, id, className, text, html}，超长内容截断，整体超过 200KB 时置 truncated=true。
+   */
+  evalPage(options = {}) {
+    return this.call('POST', '/eval', {
+      match: options.match,
+      url: options.url,
+      tabId: options.tabId,
+      frameId: options.frameId,
+      code: options.code,
+      browser: options.browser
+    }, options.timeoutMs);
+  }
+
+  /**
+   * 截取目标标签页当前可见画面，返回 {dataUrl, format, width, height}。
+   * 注意：扩展 API 只能截「当前激活」的标签页，后台标签页会返回 tab_not_active。
+   */
+  screenshot(options = {}) {
+    return this.call('POST', '/screenshot', {
+      match: options.match,
+      url: options.url,
+      tabId: options.tabId,
+      frameId: options.frameId,
+      format: options.format,
+      selector: options.selector,
+      full: !!options.full,
+      browser: options.browser
+    }, (options.timeoutMs || 20000) + 10000);
+  }
+
+  /**
+   * 读取目标标签页的登录态：cookies（含 httpOnly）+ localStorage / sessionStorage。
+   * 只传 name 时只取该 cookie；传 key 时只取该存储键；storage=false 时只取 cookie。
+   */
+  session(options = {}) {
+    return this.call('POST', '/session', {
+      match: options.match,
+      url: options.url,
+      tabId: options.tabId,
+      name: options.name,
+      key: options.key,
+      local: options.local,
+      session: options.session,
+      storage: options.storage,
+      browser: options.browser
+    }, options.timeoutMs);
+  }
+
+  /** 把本地文件塞进页面的 file input（files 传绝对路径数组）。 */
+  upload(options = {}) {
+    return this.call('POST', '/upload', {
+      match: options.match,
+      url: options.url,
+      tabId: options.tabId,
+      selector: options.selector,
+      files: options.files,
+      browser: options.browser
+    }, (options.timeoutMs || 30000) + 10000);
+  }
+
+  /** 用目标标签页的登录态下载：在页面里带 cookie 请求 url，返回 base64 等信息。 */
+  download(options = {}) {
+    return this.call('POST', '/download', {
+      match: options.match,
+      tabId: options.tabId,
+      url: options.url,
+      maxBytes: options.maxBytes,
+      headers: options.headers,
+      browser: options.browser
+    }, (options.timeoutMs || 60000) + 10000);
+  }
+
+  /**
    * 读取正文。
    * 传 returnHtml 时额外返回元素 outerHTML、可编辑区域清单等结构信息，
    * 用于定位选择器（例如找 Confluence 编辑器）。
