@@ -2392,7 +2392,11 @@ async function grabTab(task) {
     if (downloadId === null && item && typeof item.id === 'number') { downloadId = item.id; }
   };
 
-  const filename = task.filename ? String(task.filename).split(/[\\/]/).pop() : 'grab.bin';
+  // 页面侧用 <a download> 触发下载，文件名只能是纯名字（不能带路径），
+  // 因此这里不加子目录；落点由浏览器下载目录决定，与 save 相同。
+  const filename = task.filename
+    ? String(task.filename).split(/[\\/]/).pop()
+    : filenameFromUrl(task.url);
 
   try {
     chrome.downloads.onCreated.addListener(onCreated);
@@ -2411,14 +2415,10 @@ async function grabTab(task) {
           const res = await fetch(url, { credentials: 'omit', mode: 'cors' });
           if (!res.ok) { return { ok: false, status: res.status }; }
           const blob = await res.blob();
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = name;
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) { /* 忽略 */ } }, 60000);
-          return { ok: true, bytes: blob.size, type: blob.type || null };
+          const objectUrl = URL.createObjectURL(blob);
+          // 交给扩展用 chrome.downloads 接管，这样能指定子目录与重名策略；
+          // 成功后由扩展通知页面回收 blob URL。
+          return { ok: true, bytes: blob.size, type: blob.type || null, objectUrl };
         } catch (e) {
           return { ok: false, error: String(e && e.message ? e.message : e) };
         }
@@ -2438,6 +2438,33 @@ async function grabTab(task) {
         cdpPaused: paused,
         hint: '页面内取流失败。注意 grab 与 DevTools 互斥（一个标签页同时只能有一个调试器）。'
       };
+    }
+
+    // 用扩展的下载栈接管页面里生成的 blob URL，从而能指定统一子目录
+    if (fetched.objectUrl) {
+      try {
+        downloadId = await chrome.downloads.download({
+          url: fetched.objectUrl,
+          filename: withMediaSubdir(task.filename || filenameFromUrl(task.url)),
+          conflictAction: task.overwrite ? 'overwrite' : 'uniquify'
+        });
+      } catch (e) {
+        // 跨上下文 blob URL 不被接受时，退回页面自己触发下载（会落在下载根目录）
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN',
+          func: (u, n) => {
+            const a = document.createElement('a');
+            a.href = u; a.download = n; a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { try { URL.revokeObjectURL(u); a.remove(); } catch (e) { /* 忽略 */ } }, 60000);
+          },
+          args: [fetched.objectUrl, filename]
+        }).catch(() => {});
+      }
+    } else {
+      return { ok: false, error: 'grab_no_blob_url', url: task.url, cdpPaused: paused };
     }
 
     // 等下载真正落盘
@@ -2513,7 +2540,7 @@ async function saveTab(task) {
     // 同名文件默认自动改名，避免静默覆盖已有文件
     conflictAction: task.overwrite ? 'overwrite' : 'uniquify'
   };
-  if (task.filename) { options.filename = String(task.filename); }
+  options.filename = withMediaSubdir(task.filename || filenameFromUrl(target));
   if (task.saveAs) { options.saveAs = true; }
 
   let downloadId;
@@ -2656,6 +2683,24 @@ function filenameFromUrl(url) {
   } catch (e) {
     return 'download.bin';
   }
+}
+
+/**
+ * 媒体下载统一落在浏览器下载目录下的这个子目录里，
+ * 与 yt-dlp 的输出目录保持一致（两边都指向同一个物理位置）。
+ */
+const MEDIA_SUBDIR = 'videos';
+
+/**
+ * 给文件名补上媒体子目录。
+ * 调用方已经显式给了路径（含分隔符）就尊重它，否则放到统一子目录下。
+ * 注意 chrome.downloads 只接受相对路径，绝对路径和 ".." 会被拒绝。
+ */
+function withMediaSubdir(name) {
+  const n = String(name || '').trim();
+  if (!n) { return MEDIA_SUBDIR + '/download.bin'; }
+  if (n.includes('/') || n.includes('\\')) { return n; }
+  return MEDIA_SUBDIR + '/' + n;
 }
 
 /** 字符串截断，用于 session 返回的长值。 */

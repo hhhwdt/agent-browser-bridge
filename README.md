@@ -97,6 +97,12 @@ They look similar but fail in completely different places, so pick by what the s
 | Size limit | 20 MB | none | none |
 | Bytes travel | through the bridge (base64) | straight to disk | straight to disk |
 | Needs a tab | yes | no | yes (and no DevTools on it) |
+| Where it lands | the path you give it | download dir + `videos/` | download dir + `videos/` |
+
+Save and grab deliberately share the same destination (`<browser download dir>/videos/`) so media
+from either path — and from `yt-dlp`, if you point its `-o` there too — ends up in one folder. Only
+`download` writes wherever you ask, because it is the one that hands you the bytes rather than
+writing them itself.
 
 - **`download`** — you want the bytes to process them (a CSV export, a JSON API behind SSO).
 - **`save`** — a plain URL that downloads fine on its own (open CDN, same-origin file).
