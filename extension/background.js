@@ -1,19 +1,37 @@
 /**
- * Agent Browser Bridge —— 后台服务脚本。
+ * Agent Browser Bridge —— 扩展后台服务脚本（MV3 service worker）。
  *
  * 工作方式：
- *   1. 通过长轮询（long-poll）连接本机 HTTP 桥接服务，地址固定为
- *      http://127.0.0.1:18777。
- *   2. 收到任务后，用 chrome.scripting.executeScript 在目标标签页里执行只读
- *      提取脚本，然后把结果回传。
+ *   1. 通过长轮询连接本机桥接服务 http://127.0.0.1:18777；
+ *   2. 收到任务后，用 chrome.scripting.executeScript 在目标标签页里执行动作，
+ *      再把结果回传。
  *
  * 关键点：executeScript 对后台标签页同样有效，且不会切换标签、不会聚焦窗口，
  * 因此用户在前台做别的事情时完全不受影响。
  *
+ * 本文件按职责分区，从上到下依次是：
+ *
+ *   1. 配置与浏览器标识
+ *   2. 注入页面执行的函数（只带自身源码，不能引用模块作用域）
+ *        extractInPage / clickInPage / linksInPage / typeInPage / keyInPage
+ *        indicatorInPage / tabMarkInPage / mediaInPage / waitInPage / diagInPage
+ *   3. 权限守卫与注入辅助（withTimeout、injectAndPick、readInjection…）
+ *   4. 各动作实现（read / links / click / type / key / navigate / wait /
+ *      frames / mark / unmark / activate / close / reload / save / grab /
+ *      media / download / eval / screenshot / session / upload / diag）
+ *   5. 标签页标记（徽标 + 图标圆点 + 标题前缀）
+ *   6. 任务分发与长轮询主循环
+ *   7. 启动引导、错误记录、弹窗消息处理
+ *
+ * 改动时的两条硬约束：
+ *   - 注入函数必须自包含。可用 D:\Environment\claude\utils\check-inject-scope.js 静态检查。
+ *   - 每次注入都要有超时。冻结的标签页会让 executeScript 永不返回。
+ *
  * 安全边界：
- *   - 只读。本扩展不提供点击、输入、导航等任何写操作。
- *   - 读取非默认授权站点时，需要用户在该站点的权限弹窗中明确授权。
+ *   - 站点访问默认拒绝，需用户在扩展弹窗中逐站授权（或一次性授权全部）。
+ *   - cookies 为可选权限，未授予时 session 动作返回 permission_not_granted。
  *   - 只连接 127.0.0.1，不访问任何外部网络。
+ *   - 点击按风险分级：破坏性文案的按钮需调用方显式声明才执行。
  */
 
 const BRIDGE_URL = 'http://127.0.0.1:18777';
@@ -2333,7 +2351,7 @@ async function uploadTab(task) {
  * 不支持 blob: —— 那是页面内存里的对象引用，不是可下载的网络地址。
  */
 /**
- * 保存「有防盗链且不发 CORS 头」的媒体（如抖音视频）。
+ * 保存「有防盗链且不发 CORS 头」的媒体。
  *
  * save 走浏览器下载栈，不带 Referer，会被防盗链 403；download 在页面里 fetch
  * 能带上 Referer，但跨域读取被 CORS 拦。这里把两者拼起来：

@@ -304,7 +304,7 @@ class BrowserBridgeClient {
   }
 
   /**
-   * 抓取受防盗链/CORS 保护的媒体（如抖音视频）。
+   * 抓取受防盗链/CORS 保护的媒体（签名地址 + 拒绝跨域读取的 CDN）。
    * 通过 CDP 给跨域响应补上 CORS 头，让页面内 fetch 能读到字节，
    * 再由页面触发浏览器下载。需要指定在哪个标签页内取流（match 或 tabId），
    * 且该标签页不能开着 DevTools。

@@ -11,35 +11,28 @@
  *   node server.js            默认端口 18777
  *   node server.js --port 18778
  *
- * HTTP 接口（全部只监听 127.0.0.1）：
+ * HTTP 接口（全部只监听 127.0.0.1）。每个动作的完整入参与返回见 README.md，
+ * 这里只列清单，方便定位：
  *
- *   GET  /health
- *       返回 { ok, extensionConnected, pendingTasks }
+ *   GET  /health  /capabilities   状态、apiVersion、能力清单、在线浏览器
+ *   GET  /tabs                    标签页清单（含 discarded / status / favIconUrl）
+ *   POST /read   /links   /media          读取类
+ *   POST /click  /type    /key   /navigate /eval   交互类
+ *   POST /save   /grab    /download   /upload      文件类
+ *   POST /session                         站点 Cookie 与存储（需 cookies 可选权限）
+ *   POST /screenshot                      截图（走 debugger）
+ *   POST /wait   /frames  /diag           同步与诊断
+ *   POST /mark   /unmark  /activate /close /reload  标签页与扩展管理
+ *   GET  /poll   /result                  扩展专用（长轮询与回传）
  *
- *   GET  /tabs
- *       返回当前浏览器所有已打开标签页的只读元信息
- *       { ok, tabs: [{ id, windowId, index, active, title, url }] }
- *
- *   POST /read
- *       读取指定标签页的正文，后台执行、不切换标签、不抢焦点
- *       请求体：
- *         { match?: string        URL 子串，优先命中激活标签页
- *           url?:   string        精确或前缀匹配
- *           tabId?: number        直接指定标签页 id
- *           selector?: string     正文选择器，省略时自动识别
- *           includeLinks?: bool   是否同时返回页面链接
- *           timeoutMs?: number    等待超时，默认 30000 }
- *       返回：
- *         { ok: true, data: { tabId, wasActive, title, url, usedSelector, text, charCount, links } }
- *         或 { ok: false, error, hint? }
- *
- *   GET  /poll   （扩展专用，长轮询）
- *   POST /result （扩展专用，回传结果）
+ * 路由说明：
+ *   请求可带 browser 指定 edge / chrome；未指定时按 edge → chrome 顺序逐个尝试，
+ *   命中真正包含目标标签页的那个浏览器。任务只投递给目标浏览器自己的队列。
  *
  * 安全说明：
  *   - 只绑定 127.0.0.1，不对局域网或外网开放。
- *   - 校验 Origin，拒绝来自普通网页的请求，避免恶意页面通过 CSRF 驱动扩展读数据。
- *   - 服务端本身不做任何页面操作，只做转发；是否可读由浏览器扩展的站点授权决定。
+ *   - 校验 Origin，拒绝来自普通网页的请求，避免恶意页面通过 CSRF 驱动扩展。
+ *   - 服务端本身不做任何页面操作，只做转发；是否可操作由浏览器扩展的站点授权决定。
  */
 
 'use strict';
