@@ -1924,11 +1924,6 @@ async function screenshotTab(task) {
 
   const format = task.format === 'jpeg' ? 'jpeg' : 'png';
 
-  // 首选方式走 CDP，需要 debugger 可选权限；未授予时下面会回退到 DOM 方案，
-  // 因此这里只探测、不直接失败。
-  const cdpPerm = await requireOptionalPermissions(['debugger']);
-  const cdpAllowed = !cdpPerm;
-
   // 元素截图：先量出元素在页面坐标里的矩形
   let clip = null;
   if (task.selector) {
@@ -1940,10 +1935,6 @@ async function screenshotTab(task) {
 
   // 首选 CDP：能截后台标签页、整页和指定元素（中途会短暂附加调试器）
   try {
-    if (!cdpAllowed) {
-      // 未授予 debugger 权限时直接走退避方案，不必先撞一次异常
-      throw new Error('debugger 权限未授予，跳过 CDP');
-    }
     const cdp = await captureByCdp(tab.id, format, clip, !!task.full || !!clip);
     return {
       ok: true,
@@ -1964,18 +1955,6 @@ async function screenshotTab(task) {
 
     // 退避：CDP 不可用时改用扩展自带截屏，但它只能截当前可见标签页
     if (!tab.active) {
-      // 区分"没授权"和"CDP 用不了"，否则提示会把人引向错误的方向
-      if (!cdpAllowed) {
-        return {
-          ok: false,
-          error: 'permission_not_granted',
-          missing: ['debugger'],
-          url: tab.url,
-          hint: '后台标签页的截图需要 debugger 权限（CDP）。'
-            + '请点击扩展图标，在弹窗中「授予高级权限」后重试；'
-            + '或先把该标签页切到前台，用扩展自带的截屏退避方案。'
-        };
-      }
       return {
         ok: false,
         error: 'capture_failed',
@@ -2026,8 +2005,9 @@ async function screenshotTab(task) {
 /**
  * 检查可选权限是否已授予。
  *
- * debugger 与 cookies 属于可选权限（可选权限不会在安装时强制索取，
- * 由用户在扩展弹窗中按需授予），因此调用前必须先确认，否则 API 直接抛错。
+ * 只有 cookies 是可选权限（安装时不索取，由用户在扩展弹窗中按需授予）。
+ * debugger 不是可选的 —— Chrome 明确禁止其出现在 optional_permissions 中，
+ * 因此它只能作为必需权限，无需也无法在运行时申请。
  */
 async function requireOptionalPermissions(names) {
   const needed = [];
@@ -2156,10 +2136,6 @@ async function uploadTab(task) {
   if (files.length === 0) {
     return { ok: false, error: 'missing_files', hint: '用 --file <绝对路径> 指定要上传的文件，可重复多次' };
   }
-
-  // 走 CDP 需要 debugger 可选权限
-  const permErr = await requireOptionalPermissions(['debugger']);
-  if (permErr) { return permErr; }
 
   const selector = task.selector || 'input[type=file]';
   const target = { tabId: tab.id };

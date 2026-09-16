@@ -51,19 +51,25 @@ It also handles the awkward realities of real sites: cross-frame editors (TinyMC
 | `diag` | Extension runtime diagnostics: version, polling, SW restarts, errors |
 | Multi-browser | Chrome and Edge run side by side, fully isolated, with automatic routing |
 
-### Advanced capabilities (opt-in)
-
-These require extra permissions that are **not** requested at install time. Enable them from the
-extension popup ("授予高级权限"); until then they return `permission_not_granted` and nothing else
-is affected.
+### Advanced capabilities
 
 | Capability | Permission | Notes |
 |---|---|---|
 | `eval` | — | Run JavaScript in the page and get the result back |
-| `session` | `cookies` | Read the tab's cookies (including httpOnly) plus localStorage/sessionStorage |
-| `screenshot` | `debugger` | Element / full-page / background-tab capture via CDP; falls back to visible-tab capture without it |
-| `upload` | `debugger` | Put local files into a file input via CDP `DOM.setFileInputFiles` |
 | `download` | — | Fetch a URL with the page's login state and return the bytes as base64 |
+| `session` | `cookies` (**optional**) | Read the tab's cookies (including httpOnly) plus localStorage/sessionStorage |
+| `screenshot` | `debugger` (**required**) | Element / full-page / background-tab capture via CDP |
+| `upload` | `debugger` (**required**) | Put local files into a file input via CDP `DOM.setFileInputFiles` |
+
+Two notes on permissions, both learned from Chrome's own behaviour:
+
+- `debugger` **cannot** be declared as an optional permission — Chrome reports
+  *"Permission 'debugger' cannot be listed as optional. This permission will be omitted."* and then
+  drops it, so it has to be a required permission. It is what enables `upload` and CDP screenshots,
+  and Chrome will show an install-time warning for it. While the debugger is attached the browser
+  also shows its "started debugging this browser" infobar; that is expected.
+- `cookies` **can** be optional, so it is: `session` stays off until you grant it from the popup,
+  and returns `permission_not_granted` until then. Everything else keeps working.
 
 ## Requirements
 
@@ -97,9 +103,13 @@ operate on — either one hostname at a time, or "authorize all sites".
 The extension requests no host permission up front; access is granted through the browser's own
 permission prompt, so you stay in control.
 
-The same popup has a separate **授予高级权限 / Grant advanced permissions** button for the opt-in
-capabilities above. Only the core permissions (`tabs`, `scripting`, `storage`, `alarms`) are
-requested at install time, so the install prompt stays minimal.
+The same popup has a **授予 / Grant** button for the optional `cookies` permission. Requesting a
+permission that the manifest does not declare as optional throws
+*"Only permissions specified in the manifest may be requested"*, so the popup only ever asks for
+`cookies`.
+
+At install time Chrome will warn about `debugger` (required, for `upload` and CDP screenshots).
+The host permissions are still denied by default — no site access is granted until you approve it.
 
 ## Usage
 
@@ -255,10 +265,12 @@ in turn and uses the one that actually contains the matching tab.
   malicious site from driving the extension via CSRF.
 - Site access is enforced by the browser's permission system and is **denied by default**. The
   install manifest requests no host permissions beyond the local bridge.
-- **Privileged capabilities are opt-in and off by default.** `session` (cookie/storage reading),
-  `upload` and CDP screenshots need `cookies` / `debugger`, which are declared as *optional*
-  permissions and only requested when you press the button in the popup. Until granted, those
-  actions fail with `permission_not_granted`.
+- **Cookie access is opt-in and off by default.** `session` needs the `cookies` permission, which is
+  declared as *optional* and only requested when you press the button in the popup. Until granted it
+  fails with `permission_not_granted`.
+- **`debugger` is a required permission**, because Chrome forbids it being optional. It powers
+  `upload` and CDP screenshots, and shows up as an install-time warning. If you do not want the
+  extension holding it, remove those two actions — nothing else depends on it.
 - Read operations have no side effects. Write operations are risk-classified and logged back to the
   caller with what was actually clicked or typed.
 - No telemetry and no external network calls. The only outbound request is `download`, which fetches
