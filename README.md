@@ -61,22 +61,44 @@ It also handles the awkward realities of real sites: cross-frame editors (TinyMC
 | `screenshot` | `debugger` (**required**) | Element / full-page / background-tab capture via CDP |
 | `upload` | `debugger` (**required**) | Put local files into a file input via CDP `DOM.setFileInputFiles` |
 | `save` | `downloads` (**required**) | Save a URL to disk through the browser's own download stack |
+| `grab` | `debugger` (**required**) | Save media from CDNs that are hotlink-protected *and* send no CORS headers |
 
-### `save` vs `download`
+### Three ways to get bytes off a page
 
-Both fetch a URL, but they are different tools and the distinction matters:
+They look similar but fail in completely different places, so pick by what the site does:
 
-| | `save` | `download` |
-|---|---|---|
-| Mechanism | `chrome.downloads.download()` — browser download stack | `fetch()` **inside the page** |
-| CORS | **not applicable** | subject to CORS; cross-origin CDNs usually block it |
-| Size limit | none | `DOWNLOAD_MAX_BYTES` (20 MB) |
-| Bytes travel | straight to disk | through the bridge as base64 |
-| Destination | browser download dir (`filename` picks a relative subpath) | any path you choose |
-| `blob:` URLs | no | no |
+| | `download` | `save` | `grab` |
+|---|---|---|---|
+| Mechanism | `fetch()` inside the page | `chrome.downloads` | CDP-injected CORS + page `fetch` + blob download |
+| Sends the page's `Referer` | yes | **no** | yes |
+| CORS applies | **yes** | no | bypassed (header injected) |
+| Size limit | 20 MB | none | none |
+| Bytes travel | through the bridge (base64) | straight to disk | straight to disk |
+| Needs a tab | yes | no | yes (and no DevTools on it) |
 
-So for media (images, video) use `save`; for "give me the bytes so I can process them" (a CSV
-export, a JSON API behind SSO) use `download`.
+- **`download`** — you want the bytes to process them (a CSV export, a JSON API behind SSO).
+- **`save`** — a plain URL that downloads fine on its own (open CDN, same-origin file).
+- **`grab`** — the CDN rejects requests without a `Referer` *and* refuses CORS, which is exactly
+  where the other two fail. Typical case: a video CDN that serves signed, expiring URLs and
+  rejects anything without the site's `Referer`. Note that many video sites stream via MSE with
+  `blob:` sources instead, which no method here can save — the `blob:` URL is an in-memory handle,
+  not a fetchable address.
+
+The reason `grab` exists at all: `Referer` is a forbidden header for XHR/fetch *and* for the
+`downloads` API, so it cannot be attached by script; `declarativeNetRequest` can set it but does
+**not** apply to extension-initiated downloads (verified). So `save` inevitably gets 403 from a
+hotlink-protected CDN, and `download` inevitably gets `Failed to fetch` from CORS. `grab` works
+around both by letting the *page* make the request (correct `Referer`, for free) while CDP injects
+`Access-Control-Allow-Origin` into the response so the page is allowed to read it.
+
+`grab` is also the only one that briefly attaches the debugger: the browser shows its
+"started debugging this browser" infobar, and the tab cannot have DevTools open at the same time.
+
+```
+node read.js download --match "example.com" --url "/export.csv" --out data.csv      # bytes to process
+node read.js save     --url "https://cdn.example.com/pic.jpg" --filename "a/pic.jpg"  # plain URL
+node read.js grab     --match "example.com/watch" --url "<media url>" --filename "clip.mp4"
+```
 
 ```bash
 # absolute URL
@@ -299,8 +321,11 @@ in turn and uses the one that actually contains the matching tab.
   declared as *optional* and only requested when you press the button in the popup. Until granted it
   fails with `permission_not_granted`.
 - **`debugger` is a required permission**, because Chrome forbids it being optional. It powers
-  `upload` and CDP screenshots, and shows up as an install-time warning. If you do not want the
-  extension holding it, remove those two actions — nothing else depends on it.
+  `upload`, CDP screenshots and `grab`, and shows up as an install-time warning. If you do not want
+  the extension holding it, remove those three actions — nothing else depends on it.
+- `grab` injects a permissive CORS header into responses from the one CDN origin you asked for, for
+  the duration of that single call. The interception is scoped to that origin, every other request
+  is passed through untouched, and the debugger is detached as soon as the call ends.
 - Read operations have no side effects. Write operations are risk-classified and logged back to the
   caller with what was actually clicked or typed.
 - No telemetry and no external network calls. The only outbound request is `download`, which fetches

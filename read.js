@@ -259,6 +259,29 @@ async function main() {
         return;
       }
 
+      case 'grab': {
+        requireTarget(args);
+        if (!args.url) {
+          console.error('需要 --url 指定媒体地址');
+          process.exit(1);
+        }
+        const body = {
+          url: args.url,
+          filename: args.filename,
+          browser: args.browser
+        };
+        if (args.match) { body.match = args.match; }
+        if (args.tabId !== undefined) { body.tabId = num(args.tabId); }
+
+        const data = await client.grab({ ...body, timeoutMs: num(args.timeout) || 180000 });
+        if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
+        console.log('地址    : ' + data.url);
+        console.log('页面取流: ' + (data.fetchedBytes ? (data.fetchedBytes / 1024 / 1024).toFixed(2) + ' MB' : '未知'));
+        console.log('状态    : ' + (data.done ? '已完成' : data.state));
+        if (data.filename) { console.log('落盘路径: ' + data.filename); }
+        return;
+      }
+
       case 'save': {
         if (!args.url) {
           console.error('需要 --url 指定要保存的地址（可用相对地址，配合 --match 按页面解析）');

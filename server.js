@@ -90,6 +90,7 @@ const CAPABILITIES = [
   'diag',         // 扩展运行诊断
   'activate',     // 激活标签页（唤醒冻结标签页）
   'save',         // 保存文件到磁盘（浏览器下载栈）
+  'grab',         // 抓取受防盗链/CORS 保护的媒体
   'reload',       // 重新加载扩展自身（开发用）
   'multiBrowser'  // 多浏览器隔离与路由
 ];
@@ -438,6 +439,37 @@ async function handle(req, res) {
       tabId: body.tabId
     }, clampTimeout(body.timeoutMs));
 
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  // ---- 抓取受防盗链/CORS 保护的媒体 ----
+  if (req.method === 'POST' && path === '/grab') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+    if (!body.url) {
+      sendJson(res, 400, { ok: false, error: 'missing_url', hint: '需要提供 url' }, req);
+      return;
+    }
+    if (!body.match && typeof body.tabId !== 'number') {
+      sendJson(res, 400, { ok: false, error: 'missing_target', hint: '需要提供 match 或 tabId，用于指定在哪个标签页内取流' }, req);
+      return;
+    }
+    const result = await dispatch({
+      action: 'grab',
+      browser: body.browser,
+      match: body.match,
+      tabId: body.tabId,
+      url: body.url,
+      filename: body.filename,
+      timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined,
+      waitMs: typeof body.waitMs === 'number' ? body.waitMs : undefined
+    }, clampTimeout(body.timeoutMs, 190000));
     sendJson(res, result.ok ? 200 : 502, result, req);
     return;
   }

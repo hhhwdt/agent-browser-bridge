@@ -1,6 +1,6 @@
 {
   "name": "agent-browser-bridge",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Let local agents drive your already-open browser in the background, without stealing focus.",
   "license": "MIT",
   "type": "commonjs",

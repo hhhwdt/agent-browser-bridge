@@ -2191,6 +2191,154 @@ async function uploadTab(task) {
  *
  * 不支持 blob: —— 那是页面内存里的对象引用，不是可下载的网络地址。
  */
+/**
+ * 保存「有防盗链且不发 CORS 头」的媒体（如抖音视频）。
+ *
+ * save 走浏览器下载栈，不带 Referer，会被防盗链 403；download 在页面里 fetch
+ * 能带上 Referer，但跨域读取被 CORS 拦。这里把两者拼起来：
+ *   1. 用 CDP 的 Fetch 域在**响应阶段**拦截目标 CDN 的响应，
+ *      给它补上 Access-Control-Allow-Origin，让页面能合法读到字节；
+ *   2. 页面内 fetch（自动带正确的 Referer）拿到 blob，
+ *      用 blob URL + <a download> 触发浏览器下载，字节不经过桥接服务；
+ *   3. 全程只在目标 origin 上拦截，其他请求原样放行，避免卡住页面。
+ *
+ * 代价：期间会短暂附加调试器（浏览器顶部会出现提示条），且与 DevTools 互斥。
+ */
+async function grabTab(task) {
+  const tab = await resolveTab(task);
+  if (!tab || typeof tab.id !== 'number') {
+    return { ok: false, error: 'no_tab_matched', hint: '没有找到匹配的标签页' };
+  }
+  if (!task.url) { return { ok: false, error: 'missing_url', hint: '用 --url 指定媒体地址' }; }
+
+  let pattern;
+  try { pattern = new URL(task.url).origin + '/*'; }
+  catch (e) { return { ok: false, error: 'bad_url', url: task.url }; }
+
+  const target = { tabId: tab.id };
+  const targetKey = String(task.url).slice(0, 120);
+  const paused = [];
+  let attached = false;
+  let downloadId = null;
+
+  /** 只拦截目标响应，其余一律放行，否则页面会被 Fetch 域卡住。 */
+  const onEvent = (source, method, params) => {
+    if (!source || source.tabId !== tab.id || method !== 'Fetch.requestPaused') { return; }
+    const p = params || {};
+    const url = (p.request && p.request.url) || '';
+    const isTarget = url.includes(targetKey) || url.slice(0, 120) === targetKey;
+
+    if (isTarget && p.responseStatusCode) {
+      const headers = (p.responseHeaders || [])
+        .filter((h) => h.name.toLowerCase() !== 'access-control-allow-origin');
+      headers.push({ name: 'Access-Control-Allow-Origin', value: '*' });
+      paused.push({ url: url.slice(0, 90), status: p.responseStatusCode });
+
+      chrome.debugger.sendCommand(target, 'Fetch.continueResponse', {
+        requestId: p.requestId,
+        responseHeaders: headers
+      }).catch(() => {
+        chrome.debugger.sendCommand(target, 'Fetch.continueRequest', { requestId: p.requestId }).catch(() => {});
+      });
+      return;
+    }
+
+    chrome.debugger.sendCommand(target, 'Fetch.continueRequest', { requestId: p.requestId }).catch(() => {});
+  };
+
+  // 页面触发下载后，由这里拿到 downloadId，才能等到它真正落盘
+  const onCreated = (item) => {
+    if (downloadId === null && item && typeof item.id === 'number') { downloadId = item.id; }
+  };
+
+  const filename = task.filename ? String(task.filename).split(/[\\/]/).pop() : 'grab.bin';
+
+  try {
+    chrome.downloads.onCreated.addListener(onCreated);
+    await chrome.debugger.attach(target, '1.3');
+    attached = true;
+    chrome.debugger.onEvent.addListener(onEvent);
+    await chrome.debugger.sendCommand(target, 'Fetch.enable', {
+      patterns: [{ urlPattern: pattern, requestStage: 'Response' }]
+    });
+
+    const inj = await withTimeout(chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: async (url, name) => {
+        try {
+          const res = await fetch(url, { credentials: 'omit', mode: 'cors' });
+          if (!res.ok) { return { ok: false, status: res.status }; }
+          const blob = await res.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = name;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) { /* 忽略 */ } }, 60000);
+          return { ok: true, bytes: blob.size, type: blob.type || null };
+        } catch (e) {
+          return { ok: false, error: String(e && e.message ? e.message : e) };
+        }
+      },
+      args: [task.url, filename]
+    }), task.timeoutMs || 180000);
+
+    const fetched = inj && inj[0] ? inj[0].result : null;
+
+    if (!fetched || !fetched.ok) {
+      return {
+        ok: false,
+        error: 'grab_fetch_failed',
+        url: task.url,
+        status: fetched && fetched.status,
+        message: fetched && fetched.error,
+        cdpPaused: paused,
+        hint: '页面内取流失败。注意 grab 与 DevTools 互斥（一个标签页同时只能有一个调试器）。'
+      };
+    }
+
+    // 等下载真正落盘
+    const waitMs = typeof task.waitMs === 'number' ? task.waitMs : 60000;
+    const deadline = Date.now() + waitMs;
+    let item = null;
+    while (Date.now() < deadline) {
+      if (downloadId !== null) {
+        const found = await chrome.downloads.search({ id: downloadId }).catch(() => null);
+        item = found && found[0] ? found[0] : null;
+        if (item && (item.state === 'complete' || item.state === 'interrupted')) { break; }
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    return {
+      ok: true,
+      data: {
+        tabId: tab.id,
+        url: task.url,
+        fetchedBytes: fetched.bytes,
+        mime: fetched.type,
+        cdpPaused: paused,
+        downloadId,
+        state: item ? item.state : 'unknown',
+        filename: item ? item.filename : null,
+        bytes: item && item.totalBytes > 0 ? item.totalBytes : fetched.bytes,
+        done: !!item && item.state === 'complete'
+      }
+    };
+  } catch (e) {
+    return { ok: false, error: 'grab_failed', message: String(e && e.message ? e.message : e) };
+  } finally {
+    try { chrome.downloads.onCreated.removeListener(onCreated); } catch (e) { /* 忽略 */ }
+    try { chrome.debugger.onEvent.removeListener(onEvent); } catch (e) { /* 忽略 */ }
+    if (attached) {
+      try { await chrome.debugger.sendCommand(target, 'Fetch.disable'); } catch (e) { /* 忽略 */ }
+      try { await chrome.debugger.detach(target); } catch (e) { /* 忽略 */ }
+    }
+  }
+}
+
 async function saveTab(task) {
   if (!task.url) {
     return { ok: false, error: 'missing_url', hint: '用 --url 指定要保存的地址' };
@@ -2751,6 +2899,8 @@ async function runAction(task) {
       return await sessionTab(task);
     case 'upload':
       return await uploadTab(task);
+    case 'grab':
+      return await grabTab(task);
     case 'save':
       return await saveTab(task);
     case 'download':

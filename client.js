@@ -289,6 +289,24 @@ class BrowserBridgeClient {
   }
 
   /**
+   * 抓取受防盗链/CORS 保护的媒体（如抖音视频）。
+   * 通过 CDP 给跨域响应补上 CORS 头，让页面内 fetch 能读到字节，
+   * 再由页面触发浏览器下载。需要指定在哪个标签页内取流（match 或 tabId），
+   * 且该标签页不能开着 DevTools。
+   */
+  grab(options = {}) {
+    return this.call('POST', '/grab', {
+      match: options.match,
+      tabId: options.tabId,
+      url: options.url,
+      filename: options.filename,
+      timeoutMs: options.timeoutMs,
+      waitMs: options.waitMs,
+      browser: options.browser
+    }, (options.timeoutMs || 180000) + 20000);
+  }
+
+  /**
    * 用浏览器自己的下载栈把 URL 保存到磁盘。
    * 不受 CORS 与 20MB 限制，字节直接写盘；文件落在浏览器下载目录，
    * filename 只能指定其下的相对路径。不支持 blob: 地址。
