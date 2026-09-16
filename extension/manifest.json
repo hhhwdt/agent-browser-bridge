@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Agent Browser Bridge",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "本地桥接扩展：允许本机已授权的 agent 后台读取并操作已打开标签页，不切换标签、不抢占焦点。",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
     "alarms",
-    "debugger"
+    "debugger",
+    "downloads"
   ],
   "host_permissions": [
     "http://127.0.0.1:18777/*",

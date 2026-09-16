@@ -2181,6 +2181,106 @@ async function uploadTab(task) {
 }
 
 /**
+ * 用浏览器自己的下载栈把 URL 落盘。
+ *
+ * 与 downloadTab 的本质区别：
+ *   - 这是浏览器级下载，不是页面内的 fetch，因此**不受 CORS 限制**，
+ *     也不受 downloadTab 那个 20MB 上限约束；
+ *   - 字节直接写盘，不经过桥接服务回传，因此大文件（视频）也可行；
+ *   - 文件落在浏览器下载目录，filename 只能指定其下的相对路径。
+ *
+ * 不支持 blob: —— 那是页面内存里的对象引用，不是可下载的网络地址。
+ */
+async function saveTab(task) {
+  if (!task.url) {
+    return { ok: false, error: 'missing_url', hint: '用 --url 指定要保存的地址' };
+  }
+
+  // 允许相对地址：给出标签页时按该页面的 URL 解析
+  let target = String(task.url);
+  let pageUrl = null;
+  if (typeof task.tabId === 'number' || task.match || task.url) {
+    const tab = await resolveTab(task).catch(() => null);
+    if (tab && tab.url) {
+      pageUrl = tab.url;
+      try { target = new URL(target, tab.url).href; } catch (e) { /* 保持原值 */ }
+    }
+  }
+
+  if (target.startsWith('blob:')) {
+    return {
+      ok: false,
+      error: 'unsupported_scheme',
+      url: target,
+      hint: 'blob: 是页面内存里的对象引用，无法用浏览器下载栈保存。可在页面内用 eval 取出为 data URL，但受体积限制。'
+    };
+  }
+  if (!/^https?:/i.test(target)) {
+    return { ok: false, error: 'unsupported_scheme', url: target, hint: '只支持 http/https 地址' };
+  }
+
+  const options = {
+    url: target,
+    // 同名文件默认自动改名，避免静默覆盖已有文件
+    conflictAction: task.overwrite ? 'overwrite' : 'uniquify'
+  };
+  if (task.filename) { options.filename = String(task.filename); }
+  if (task.saveAs) { options.saveAs = true; }
+
+  let downloadId;
+  try {
+    downloadId = await chrome.downloads.download(options);
+  } catch (e) {
+    return { ok: false, error: 'download_failed', url: target, message: String(e && e.message ? e.message : e) };
+  }
+
+  // 等待完成，好把真实落盘路径回报给调用方
+  const waitMs = typeof task.waitMs === 'number' ? task.waitMs : 30000;
+  const deadline = Date.now() + waitMs;
+  let item = null;
+
+  for (;;) {
+    const found = await chrome.downloads.search({ id: downloadId }).catch(() => null);
+    item = found && found[0] ? found[0] : null;
+    if (!item) { break; }
+    if (item.state === 'complete' || item.state === 'interrupted') { break; }
+    if (Date.now() >= deadline) { break; }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  if (!item) {
+    return { ok: true, data: { downloadId, url: target, pageUrl, state: 'unknown' } };
+  }
+
+  if (item.state === 'interrupted') {
+    return {
+      ok: false,
+      error: 'interrupted',
+      url: target,
+      pageUrl,
+      reason: item.error || null,
+      hint: item.error === 'SERVER_FORBIDDEN' || item.error === 'SERVER_UNAUTHORIZED'
+        ? '服务器拒绝下载，可能是链接已过期或不带正确的登录态。'
+        : undefined
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      downloadId,
+      url: target,
+      pageUrl,
+      state: item.state,
+      filename: item.filename || null,
+      bytes: item.totalBytes > 0 ? item.totalBytes : (item.bytesReceived || null),
+      mime: item.mime || null,
+      done: item.state === 'complete'
+    }
+  };
+}
+
+/**
  * 用目标标签页的登录态下载文件：在页面里带 credentials 请求，再回传 base64。
  *
  * 这样下载的是「该登录用户能拿到的内容」，不需要在本地重新登录。
@@ -2651,6 +2751,8 @@ async function runAction(task) {
       return await sessionTab(task);
     case 'upload':
       return await uploadTab(task);
+    case 'save':
+      return await saveTab(task);
     case 'download':
       return await downloadTab(task);
     case 'links':

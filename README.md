@@ -60,6 +60,36 @@ It also handles the awkward realities of real sites: cross-frame editors (TinyMC
 | `session` | `cookies` (**optional**) | Read the tab's cookies (including httpOnly) plus localStorage/sessionStorage |
 | `screenshot` | `debugger` (**required**) | Element / full-page / background-tab capture via CDP |
 | `upload` | `debugger` (**required**) | Put local files into a file input via CDP `DOM.setFileInputFiles` |
+| `save` | `downloads` (**required**) | Save a URL to disk through the browser's own download stack |
+
+### `save` vs `download`
+
+Both fetch a URL, but they are different tools and the distinction matters:
+
+| | `save` | `download` |
+|---|---|---|
+| Mechanism | `chrome.downloads.download()` — browser download stack | `fetch()` **inside the page** |
+| CORS | **not applicable** | subject to CORS; cross-origin CDNs usually block it |
+| Size limit | none | `DOWNLOAD_MAX_BYTES` (20 MB) |
+| Bytes travel | straight to disk | through the bridge as base64 |
+| Destination | browser download dir (`filename` picks a relative subpath) | any path you choose |
+| `blob:` URLs | no | no |
+
+So for media (images, video) use `save`; for "give me the bytes so I can process them" (a CSV
+export, a JSON API behind SSO) use `download`.
+
+```bash
+# absolute URL
+node read.js save --url "https://cdn.example.com/clip.mp4" --filename "clips/clip.mp4"
+
+# relative URL — resolved against the matched tab's own URL
+node read.js save --match "example.com/gallery" --url "/media/photo-01.jpg"
+```
+
+`save` waits for the download to finish and reports the real on-disk path, so you can tell the user
+where the file landed. Same-name files are renamed rather than overwritten unless you pass
+`--overwrite`. One caveat: Chrome may adjust the extension to match the server's `Content-Type`
+(e.g. a `.md` served as `text/plain` is saved as `.txt`).
 
 Two notes on permissions, both learned from Chrome's own behaviour:
 

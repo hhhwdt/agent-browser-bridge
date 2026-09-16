@@ -23,8 +23,8 @@ function parseArgs(argv) {
   const VALUE_OPTS = new Set([
     'match', 'url', 'tabId', 'frameId', 'browser', 'selector', 'text', 'href',
     'value', 'key', 'index', 'port', 'timeout', 'host',
-    // eval / screenshot / session / upload / download 用
-    'code', 'file', 'out', 'format', 'name', 'key', 'header'
+    // eval / screenshot / session / upload / download / save 用
+    'code', 'file', 'out', 'format', 'name', 'key', 'header', 'filename'
   ]);
 
   for (let i = 2; i < argv.length; i++) {
@@ -256,6 +256,35 @@ async function main() {
         const data = await client.tabs({ browser: args.browser, timeoutMs });
         if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
         printTabs(data);
+        return;
+      }
+
+      case 'save': {
+        if (!args.url) {
+          console.error('需要 --url 指定要保存的地址（可用相对地址，配合 --match 按页面解析）');
+          process.exit(1);
+        }
+        const body = {
+          url: args.url,
+          filename: args.filename,
+          saveAs: !!args.saveAs,
+          overwrite: !!args.overwrite,
+          browser: args.browser
+        };
+        if (args.match) { body.match = args.match; }
+        if (args.tabId !== undefined) { body.tabId = num(args.tabId); }
+        if (args.timeout !== undefined) { body.waitMs = num(args.timeout); }
+
+        const data = await client.save({ ...body, timeoutMs: ((num(args.timeout) || 30000) + 30000) });
+        if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
+        console.log('地址    : ' + data.url);
+        if (data.pageUrl) { console.log('来源页  : ' + data.pageUrl.slice(0, 70)); }
+        console.log('状态    : ' + (data.done ? '已完成' : data.state || '未知'));
+        if (data.filename) { console.log('落盘路径: ' + data.filename); }
+        if (data.bytes) {
+          const kb = data.bytes / 1024;
+          console.log('大小    : ' + (kb >= 1024 ? (kb / 1024).toFixed(2) + ' MB' : kb.toFixed(1) + ' KB'));
+        }
         return;
       }
 

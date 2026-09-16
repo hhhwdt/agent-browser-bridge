@@ -289,6 +289,24 @@ class BrowserBridgeClient {
   }
 
   /**
+   * 用浏览器自己的下载栈把 URL 保存到磁盘。
+   * 不受 CORS 与 20MB 限制，字节直接写盘；文件落在浏览器下载目录，
+   * filename 只能指定其下的相对路径。不支持 blob: 地址。
+   */
+  save(options = {}) {
+    return this.call('POST', '/save', {
+      match: options.match,
+      tabId: options.tabId,
+      url: options.url,
+      filename: options.filename,
+      saveAs: !!options.saveAs,
+      overwrite: !!options.overwrite,
+      waitMs: options.waitMs,
+      browser: options.browser
+    }, options.timeoutMs || 90000);
+  }
+
+  /**
    * 激活标签页并聚焦其窗口。
    * 长期未访问的标签页会被浏览器冻结，注入无响应，需先唤醒。
    * 注意：会切换用户当前视图。
