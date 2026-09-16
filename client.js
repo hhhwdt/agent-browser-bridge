@@ -289,6 +289,21 @@ class BrowserBridgeClient {
   }
 
   /**
+   * 枚举页面里的媒体候选（视频/播放清单/图片/音频），供挑选后再下载。
+   */
+  media(options = {}) {
+    return this.call('POST', '/media', {
+      match: options.match,
+      url: options.url,
+      tabId: options.tabId,
+      frameId: options.frameId,
+      minImageSize: options.minImageSize,
+      maxScanChars: options.maxScanChars,
+      browser: options.browser
+    }, options.timeoutMs || 45000);
+  }
+
+  /**
    * 抓取受防盗链/CORS 保护的媒体（如抖音视频）。
    * 通过 CDP 给跨域响应补上 CORS 头，让页面内 fetch 能读到字节，
    * 再由页面触发浏览器下载。需要指定在哪个标签页内取流（match 或 tabId），

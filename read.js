@@ -259,6 +259,31 @@ async function main() {
         return;
       }
 
+      case 'media': {
+        requireTarget(args);
+        const data = await client.media({
+          match: args.match,
+          url: args.url,
+          tabId: num(args.tabId),
+          frameId: num(args.frameId),
+          browser: args.browser
+        });
+        if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
+        const c = data.counts || {};
+        console.log('页面  : ' + (data.title || '').slice(0, 60));
+        console.log('URL   : ' + (data.url || '').slice(0, 80));
+        console.log('统计  : 视频元素 ' + (c.videos || 0) + '  播放清单 ' + (c.streams || 0) + '  图片 ' + (c.images || 0) + '  音频 ' + (c.audios || 0));
+        const show = (label, arr, n) => {
+          if (!arr || !arr.length) { return; }
+          console.log('--- ' + label + ' ---');
+          arr.slice(0, n || 8).forEach((x, i) => console.log('  [' + i + '] ' + String(x.src).slice(0, 110)));
+        };
+        show('视频元素', data.videos, 6);
+        show('播放清单/直链（页面数据）', data.streams, 8);
+        show('图片', data.images, 6);
+        return;
+      }
+
       case 'grab': {
         requireTarget(args);
         if (!args.url) {

@@ -90,6 +90,7 @@ const CAPABILITIES = [
   'diag',         // 扩展运行诊断
   'activate',     // 激活标签页（唤醒冻结标签页）
   'save',         // 保存文件到磁盘（浏览器下载栈）
+  'media',        // 枚举页面媒体候选
   'grab',         // 抓取受防盗链/CORS 保护的媒体
   'reload',       // 重新加载扩展自身（开发用）
   'multiBrowser'  // 多浏览器隔离与路由
@@ -439,6 +440,33 @@ async function handle(req, res) {
       tabId: body.tabId
     }, clampTimeout(body.timeoutMs));
 
+    sendJson(res, result.ok ? 200 : 502, result, req);
+    return;
+  }
+
+  // ---- 枚举页面媒体 ----
+  if (req.method === 'POST' && path === '/media') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e.message }, req);
+      return;
+    }
+    if (!body.match && !body.url && typeof body.tabId !== 'number') {
+      sendJson(res, 400, { ok: false, error: 'missing_target', hint: '需要提供 match、url 或 tabId 之一' }, req);
+      return;
+    }
+    const result = await dispatch({
+      action: 'media',
+      browser: body.browser,
+      match: body.match,
+      url: body.url,
+      tabId: body.tabId,
+      frameId: body.frameId,
+      minImageSize: body.minImageSize,
+      maxScanChars: body.maxScanChars
+    }, clampTimeout(body.timeoutMs, 45000));
     sendJson(res, result.ok ? 200 : 502, result, req);
     return;
   }

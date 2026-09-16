@@ -61,7 +61,29 @@ It also handles the awkward realities of real sites: cross-frame editors (TinyMC
 | `screenshot` | `debugger` (**required**) | Element / full-page / background-tab capture via CDP |
 | `upload` | `debugger` (**required**) | Put local files into a file input via CDP `DOM.setFileInputFiles` |
 | `save` | `downloads` (**required**) | Save a URL to disk through the browser's own download stack |
+| `media` | — | List the media on a page: video elements, stream manifests, images, audio |
 | `grab` | `debugger` (**required**) | Save media from CDNs that are hotlink-protected *and* send no CORS headers |
+
+### Going from a page to a saved file
+
+`media` is what makes the whole thing usable by an agent without hand-written probes: point it at a
+page and it returns every media candidate it can find — `<video>`/`<audio>` sources, HLS/DASH
+manifests and direct links scraped from the page's own data, and content-sized images (UI icons are
+filtered out by rendered dimensions).
+
+It reports `blob:` sources as such rather than hiding them, since those need the underlying manifest
+to be found before anything can be downloaded.
+
+```
+node read.js media --match "example.com/watch"
+node read.js grab  --match "example.com/watch" --url "<url from the list>" --filename "clip.mp4"
+```
+
+Verified end to end on a page whose CDN is both hotlink-protected and CORS-hostile: `media` found
+the real CDN URL, `grab` pulled 44 MB in 12s, and the result passed `ffprobe`.
+
+The same list is what you hand to an external downloader: `media` gets the URL with the browser's
+session, then `yt-dlp "<url>"` handles the HLS/DASH case if the site is one it supports.
 
 ### Three ways to get bytes off a page
 
