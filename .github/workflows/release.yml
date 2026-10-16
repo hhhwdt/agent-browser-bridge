@@ -1,0 +1,53 @@
+# 发布：推一个 v* tag 就发到 npm，并建一个 GitHub Release。
+#
+# 触发方式是打 tag，不是推 main——发版和改代码是两件事，混在一起容易把半成品发出去：
+#
+#   node tools/check-version.js        # package.json 与 manifest.json 必须一致
+#   git tag v1.7.1 && git push origin v1.7.1
+#
+# 需要先在仓库设置里加一个 secret：NPM_TOKEN（npm 的 Automation token）。
+# 没有这个 secret 时工作流会在发布那一步失败，不会静默跳过。
+#
+# 发布前不需要单独的测试步骤：npm publish 会先跑 package.json 里的 prepublishOnly，
+# 那一步执行完整离线套件，失败就不会发布。跑两遍没意义，所以这里不重复。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 建 GitHub Release
+  id-token: write   # npm 的来源证明（provenance）
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: tag 与 package.json 的版本必须一致
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag 是 $tag，package.json 是 $pkg，两者必须一致"
+            exit 1
+          fi
+          echo "准备发布 $pkg"
+
+      - name: 发布到 npm（带来源证明）
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          ABB_MCP_OFFLINE: '1'   # 发布机上没有浏览器，跳过 MCP 的真实调用那一节
+
+      - name: 建 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes

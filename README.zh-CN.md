@@ -36,8 +36,10 @@
 - [测试](#测试)
 - [项目结构](#项目结构)
 - [已知限制](#已知限制)
+- [参与开发](#参与开发)
 - [许可](#许可)
 - [免责声明](docs/DISCLAIMER.zh-CN.md) · [安全政策](docs/SECURITY.md) · [隐私说明](docs/PRIVACY.md)
+  · [变更记录](CHANGELOG.md)
 
 ---
 
@@ -148,6 +150,17 @@ Windows 下有两个辅助脚本：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restart-server.ps1   # 改完 server.js 后重启
 ```
+
+**1b. 或者装成包，后面每条命令都不用再写路径**
+
+```bash
+npm i -g .                     # 从克隆目录装：装上下面三个命令
+npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个效果
+```
+
+装上之后有 `agent-browser-bridge`（桥接）、`agent-browser-bridge-setup`（自检）、
+`agent-browser-bridge-mcp`（给 agent 用的 MCP 服务）。包里同时带着 `extension/`，第 2 步要选的
+目录由自检命令直接打印出来 —— 只负责**运行**桥接的机器不需要克隆仓库。
 
 **2. 加载扩展**
 
@@ -440,11 +453,19 @@ node test/test-offline.js        # 跑下面全部套件，最后给汇总
 | `test-frame-targeting.js` | click/type/key 只在一个框架里执行，不是每个命中的框架都执行一次 |
 | `test-client.js` | 重复的命令行参数会累加；超时不会被报成"服务未启动" |
 | `test-allowlist.js` | 哪些来源能驱动桥接，以及清单公钥推导出的 ID 与服务端常量一致 |
+| `test-sw-load.js` | 服务脚本的模块图能不能加载、启动是不是只发生一次、导出有没有少——在浏览器里加载失败只表现为"扩展没反应" |
+| `test-result-semantics.js` | 动作没做成时必须报失败，而不是报成功——这是让调用方"再也不用看第二眼"的那类缺陷 |
 | `check-inject-scope.js` | 注入函数只带自身源码：引用模块级辅助函数能编译、却在运行时报错 |
 | `check-extension-id.js` | 上面那条 ID 一致性单独跑一遍——这里对不上不会有任何可见症状 |
+| `check-version.js` | `package.json` 与清单里的版本号一致，免得 `diag` 报的版本和 registry 上的对不上 |
+| `check-package.js` | 发布包里不能有未纳入版本控制的文件；`npm pack` 会强制带上 `README*`，本机运维文档差点就这样被传上去 |
 | `test-mcp.js` | MCP 协议本身，自己充当客户端对话，而不是引入 SDK |
 
-`test-mcp.js` 在设了 `ABB_MCP_OFFLINE=1` 时会跳过需要扩展的那一节，CI 用的就是这个。
+`test-mcp.js` 在设了 `ABB_MCP_OFFLINE=1` 时会跳过需要扩展的那一节，CI 用的就是这个。同一套件在
+Linux（Node 18/20/22）和 Windows（Node 18/22）上各跑一遍——Windows 才是这工具的主场平台，
+不能只靠一个 Ubuntu 任务来证明它能用。
+
+`test/` 与 `tools/` 只存在于克隆下来的仓库里，不随 npm 包发布。
 
 **真机**：需要真浏览器，但仍然零配置。它拿桥接自己的地址当测试页——该地址在清单的必需
 host_permissions 里，天然已授权，所以没有站点要授权：
@@ -527,6 +548,14 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 - **DRM 保护的内容不在范围内。** 这类内容的解密密钥在授权服务器与硬件安全通路之后，拿到它就
   等于破解保护机制本身，本项目不做这件事。
 - 与任何浏览器厂商无关，只使用有文档的扩展 API。
+
+## 参与开发
+
+欢迎提 issue、翻译和拉取请求 —— 怎么跑测试、这个仓库要求自己守哪些规矩、以及重载扩展前必须
+知道的那个死锁，都写在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。改动记录见
+[CHANGELOG.md](CHANGELOG.md)。
+
+安全漏洞请走私密渠道，不要发公开 issue：[SECURITY.md](docs/SECURITY.md)。
 
 ## 许可
 

@@ -1,8 +1,10 @@
 # 本机测试配置（含目标站点地址，不公开）
 test-config.js
 
-# 本机运维文档（含绝对路径，不公开）
-README.txt
+# 本机运维文档（含绝对路径，不公开）。
+# 名字刻意不叫 README*：npm 打包时 README、LICENSE、package.json 是强制包含的，
+# .gitignore 和 files 白名单都拦不住，叫 README.txt 会被原样传上 registry。
+LOCAL-NOTES.txt
 
 # 运行日志与依赖
 logs/

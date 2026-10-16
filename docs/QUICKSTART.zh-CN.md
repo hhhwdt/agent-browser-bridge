@@ -145,4 +145,6 @@ node src/cli.js diag            # 扩展版本、id、连接状态、最近错�
   [免责声明](DISCLAIMER.zh-CN.md)很短，建议跟链接一起发过去。
 
 如果想要**完全不出现路径**的版本，就先发到 npm，对方 `npm i -g agent-browser-bridge` 装完直接用
-命令名，既不用 clone 也不用写路径。
+命令名：`agent-browser-bridge` 起桥接、`agent-browser-bridge-setup` 跑上面的自检、
+`agent-browser-bridge-mcp` 是第 4 步的 MCP 服务，既不用 clone 也不用写路径。包里带着
+`extension/`，所以第 2 步照旧——自检会把要加载的那个目录打印出来。

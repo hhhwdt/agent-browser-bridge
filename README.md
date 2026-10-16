@@ -39,8 +39,10 @@ background tabs**, while you keep working in another window.
 - [Testing](#testing)
 - [Project layout](#project-layout)
 - [Limitations](#limitations)
+- [Contributing](#contributing)
 - [License](#license)
 - [Disclaimer](docs/DISCLAIMER.md) · [Security policy](docs/SECURITY.md) · [Privacy](docs/PRIVACY.md)
+  · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -156,6 +158,18 @@ On Windows there are two helper scripts:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restart-server.ps1   # after editing server.js
 ```
+
+**1b. Or install it, and drop the path from every command below**
+
+```bash
+npm i -g .                     # from a clone: installs the three commands above
+npm i -g agent-browser-bridge  # the same, once the package is published
+```
+
+That gives `agent-browser-bridge` (the bridge), `agent-browser-bridge-setup` (the self-check) and
+`agent-browser-bridge-mcp` (the MCP server for the agent). The package carries `extension/` as well,
+so the self-check prints the folder to load in step 2 — no clone needed on the machine that only
+*runs* the bridge.
 
 **2. Load the extension**
 
@@ -475,11 +489,19 @@ node test/test-offline.js        # all of the suites below, then a summary
 | `test-frame-targeting.js` | click/type/key act in one frame, not in every frame that contains a match |
 | `test-client.js` | repeated CLI arguments accumulate; a timeout is not reported as "service not started" |
 | `test-allowlist.js` | which origins may drive the bridge, and that the manifest key derives the allowlisted ID |
+| `test-sw-load.js` | the service-worker module graph loads at all, boots exactly once, and still exports what it used to — in a browser a load-time failure only shows up as "the extension stopped responding" |
+| `test-result-semantics.js` | an action that could not do its job reports `ok: false` rather than success — the failure mode that leaves the caller with no reason to look again |
 | `check-inject-scope.js` | an injected function only carries its own source, so referencing a module-level helper compiles and then throws at runtime |
 | `check-extension-id.js` | the ID claim above, on its own — drift here has no visible symptom |
+| `check-version.js` | `package.json` and the manifest carry the same version, so `diag` and the registry cannot disagree about what is installed |
+| `check-package.js` | nothing untracked reaches the npm tarball; `npm pack` includes `README*` regardless of `.gitignore`, which is how a local ops document almost shipped |
 | `test-mcp.js` | the MCP protocol, spoken directly rather than through an SDK |
 
-`test-mcp.js` skips its live section when `ABB_MCP_OFFLINE=1` is set, which is what CI uses.
+`test-mcp.js` skips its live section when `ABB_MCP_OFFLINE=1` is set, which is what CI uses. The same
+suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22) — Windows is this tool's main
+platform, so it is not left to a single Ubuntu job to prove.
+
+`test/` and `tools/` exist in a clone only; they are not part of the published package.
 
 **Live** — a real browser, still no configuration. It uses the bridge's own address as the page under
 test, which the manifest already permits, so there is no site to grant:
@@ -572,6 +594,14 @@ Two things worth knowing as a contributor:
   and hardware secure path; obtaining them means defeating the protection itself, which this project
   does not do.
 - Not affiliated with any browser vendor; uses only documented extension APIs.
+
+## Contributing
+
+Bug reports, translations and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
+how to run the tests, the rules this codebase holds itself to, and the one deadlock worth knowing
+about before you reload the extension. Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
+Report vulnerabilities privately, not in a public issue: [SECURITY.md](docs/SECURITY.md).
 
 ## License
 

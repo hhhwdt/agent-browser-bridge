@@ -1,0 +1,82 @@
+name: Bug report
+description: Something did not work, or reported success without doing it.
+title: "[Bug] "
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before pasting any diagnostic output: **redact hostnames.** `diag` lists the sites you have
+        granted, which is your browsing history. The site names are almost never needed to diagnose a
+        problem — the error code and the layer that failed are.
+
+        Security issues do not belong here. See [SECURITY.md](https://github.com/hhhwdt/agent-browser-bridge/blob/main/docs/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran (CLI, MCP tool, or the popup) and what came back.
+      placeholder: |
+        node src/cli.js read --match "example.com"
+        -> { "ok": true, ... } but the text was empty
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: Shown on the extension popup, or the first lines of `node src/cli.js diag`.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Browser, browser version, OS, Node version
+      placeholder: Edge 130 on Windows 11, Node 22.18
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer looks wrong
+      description: Pick the closest one; being wrong here is fine and still useful.
+      options:
+        - The extension is not connected (extension_not_connected, or diag shows the loop stopped)
+        - A tab was not found or not authorised (no_tab_matched, permission_denied)
+        - The action ran but did the wrong thing (read, click, type, screenshot, ...)
+        - Files (save, grab, download, upload)
+        - The CLI or the MCP server
+        - The bridge server itself (port 18777)
+        - No idea
+    validations:
+      required: true
+
+  - type: textarea
+    id: diag
+    attributes:
+      label: Output of `node src/cli.js diag`
+      description: Optional, but it answers most of the "is it even connected" questions in one go.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues.
+          required: true
+        - label: If I edited `extension/`, I reloaded it and re-ran `node test/test-sw-load.js`.
+          required: false

@@ -1,0 +1,13 @@
+# 行尾刻意不设：仓库在索引里是 LF，工作区由 git 的 autocrlf 决定（Windows 上是 CRLF）。
+# 在这里写死任何一种，都会让编辑器把整棵树改一遍，或者和 git 的设置打架。
+# 同理不设 trim_trailing_whitespace：那会在既有文件里造出大量与本次改动无关的 diff。
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+
+[*.md]
+indent_size = 2

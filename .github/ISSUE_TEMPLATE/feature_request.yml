@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a capability, or a change to one that exists.
+title: "[Feature] "
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Worth knowing before you write: adding an action means touching five or six files
+        ([why](https://github.com/hhhwdt/agent-browser-bridge/blob/main/docs/ARCHITECTURE.md#adding-an-action)),
+        and anything that makes the tool quieter about what it is doing will be declined — the tab
+        marks and the `click` / `type` rails are part of the design, not defaults to be relaxed.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the tool makes hard? Concrete beats general.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Existing actions, `eval`, another tool, doing it by hand. This is often the most useful part.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: How do you drive it
+      options:
+        - CLI (src/cli.js)
+        - MCP from an agent (Claude Code, Cursor, ...)
+        - client.js from my own script
+        - Raw HTTP on 127.0.0.1:18777
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: Would you work on it?
+      options:
+        - label: I am willing to open a pull request for this.
+          required: false

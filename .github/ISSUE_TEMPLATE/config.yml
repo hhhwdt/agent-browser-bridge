@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Setup or first-run problems
+    url: https://github.com/hhhwdt/agent-browser-bridge/blob/main/docs/QUICKSTART.md
+    about: Load the extension, grant site access, connect an agent. Most first failures are one of those three steps.
+  - name: "`node src/cli.js diag` says something is missing"
+    url: https://github.com/hhhwdt/agent-browser-bridge/blob/main/docs/QUICKSTART.md#when-something-is-wrong
+    about: The self-check names the layer at fault and the next action for it.
+  - name: Security report
+    url: https://github.com/hhhwdt/agent-browser-bridge/blob/main/docs/SECURITY.md
+    about: Do not open a public issue for a vulnerability. This links to the reporting route and the threat model.

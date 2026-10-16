@@ -7,7 +7,8 @@
   "main": "src/client.js",
   "bin": {
     "agent-browser-bridge": "src/cli.js",
-    "agent-browser-bridge-mcp": "src/mcp.js"
+    "agent-browser-bridge-mcp": "src/mcp.js",
+    "agent-browser-bridge-setup": "src/setup.js"
   },
   "engines": {
     "node": ">=18"
@@ -18,6 +19,7 @@
     "docs/",
     "scripts/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -26,7 +28,8 @@
     "mcp": "node src/mcp.js",
     "test": "node test/test-offline.js",
     "test:browser": "node test/test-live.js",
-    "test:basic": "node test/test-basic.js"
+    "test:basic": "node test/test-basic.js",
+    "prepublishOnly": "node test/test-offline.js"
   },
   "keywords": [
     "browser-automation",

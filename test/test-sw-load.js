@@ -26,11 +26,23 @@ function check(name, cond, detail) {
   else { fail++; console.log(`  FAIL ${name}  ${detail === undefined ? '' : detail}`); }
 }
 
+/**
+ * 启动侧副作用的计数。加载一次模块图，下面每个计数都应当恰好是 1：
+ * 多出来的那一次就是重复注册——曾经 background.js 把整段启动块写了两遍，
+ * 结果 diag 报的"SW 启动次数"翻倍，而那个数字正是判断服务脚本是否被频繁回收的依据。
+ */
+const boot = { alarms: [], startup: 0, installed: 0, bootWrites: 0 };
+
 /** 替身 chrome：只要求"被调用时不炸"，不模拟行为。 */
 function stubGlobals() {
   const noop = () => {};
   const never = () => new Promise(() => {});
   const listeners = { addListener: noop, removeListener: noop, hasListener: () => false };
+  const countListener = (key) => ({
+    addListener: () => { boot[key] += 1; },
+    removeListener: noop,
+    hasListener: () => false
+  });
 
   globalThis.chrome = {
     runtime: {
@@ -38,14 +50,22 @@ function stubGlobals() {
       getManifest: () => ({ version: '0.0.0-test' }),
       reload: noop,
       onMessage: listeners,
-      onStartup: listeners,
-      onInstalled: listeners
+      onStartup: countListener('startup'),
+      onInstalled: countListener('installed')
     },
     storage: {
-      local: { get: async () => ({}), set: async () => {} },
+      local: {
+        get: async () => ({}),
+        // 启动计数写在 abb-boot 这个键上，按写入次数就能看出 bootstrap 跑了几遍
+        set: async (obj) => { if (obj && obj['abb-boot']) { boot.bootWrites += 1; } }
+      },
       session: { get: async () => ({}), set: async () => {} }
     },
-    alarms: { get: async () => null, create: noop, onAlarm: listeners },
+    alarms: {
+      get: async () => null,
+      create: (name) => { boot.alarms.push(name); },
+      onAlarm: listeners
+    },
     tabs: {
       query: async () => [],
       get: async () => null,
@@ -128,6 +148,17 @@ const EXPECTED = {
     const missing = names.filter((n) => mod[n] === undefined);
     check(`${file} 导出完整（${names.length} 项）`, missing.length === 0, '缺少: ' + missing.join(', '));
   }
+
+  console.log('\n[3] 启动只发生一次');
+  // bumpBootCount / loadMarks 都是异步写入，等一轮微任务再断言
+  await new Promise((r) => setTimeout(r, 0));
+  check('启动计数只写一次 abb-boot', boot.bootWrites === 1, `实际 ${boot.bootWrites} 次`);
+  check('保活闹钟只创建一次',
+    boot.alarms.filter((n) => n === 'abb-keepalive').length === 1,
+    JSON.stringify(boot.alarms));
+  check('onStartup / onInstalled 各只注册一次',
+    boot.startup === 1 && boot.installed === 1,
+    `startup=${boot.startup} installed=${boot.installed}`);
 
   console.log(`\n通过 ${pass}，失败 ${fail}`);
   process.exit(fail === 0 ? 0 : 1);

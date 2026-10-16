@@ -29,6 +29,9 @@ const SUITES = [
   ['扩展来源允许列表', 'test-allowlist.js'],
   ['注入函数自包含', path.join('..', 'tools', 'check-inject-scope.js')],
   ['扩展 ID 与清单公钥一致', path.join('..', 'tools', 'check-extension-id.js')],
+  ['发布包里没有本机专用文件', path.join('..', 'tools', 'check-package.js')],
+  ['两处版本号一致', path.join('..', 'tools', 'check-version.js')],
+  ['动作失败时不报成功', 'test-result-semantics.js'],
   ['MCP 协议（自己充当客户端）', 'test-mcp.js']
 ];
 

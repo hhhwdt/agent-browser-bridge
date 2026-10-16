@@ -60,8 +60,9 @@ docs/           disclaimer, security model, privacy, quickstart, this file
 
 Three rules keep it that way:
 
-- **No code at the top level.** Only `README*`, `LICENSE` and `package.json` are there. Anything
-  executable lives in a directory named for what it is.
+- **No code at the top level.** The root holds `README*`, `LICENSE`, `CHANGELOG.md`,
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and `package.json` — text, not code. Anything executable
+  lives in a directory named for what it is.
 - **Entry points are npm bins.** `src/cli.js` and `src/mcp.js` are declared as `bin`, so an
   installed copy is invoked as `agent-browser-bridge` / `agent-browser-bridge-mcp` rather than by
   path. From a clone you type `node src/server.js`; from npm you type the command.
