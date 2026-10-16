@@ -8,7 +8,7 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
-## [Unreleased]
+## [1.7.1] - 2026-10-16
 
 Eight defects that all had the same shape: the tool reported success for work that did not happen.
 
