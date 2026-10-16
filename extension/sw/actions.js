@@ -284,9 +284,12 @@ export async function evalTab(task) {
 
   // 注入主世界：能访问页面自身的全局对象；同时避开扩展隔离世界的 CSP 限制
   // （页面若自带严格 CSP 仍可能拦 eval，这种情况会返回 eval_error 并说明原因）
-  const target = typeof task.frameId === 'number'
-    ? { tabId: tab.id, frameIds: [task.frameId] }
-    : { tabId: tab.id, allFrames: true };
+  //
+  // 只注入一个框架。eval 的代码可能带副作用（点按钮、提交表单），allFrames 会让它
+  // 在每个框架里各跑一次，而回报的只是其中一份结果——副作用收不回来。与 click/type/key
+  // 同一条规矩：副作用只能发生一次。默认主框架，要动 iframe 里的东西就显式给 frameId。
+  const evalFrameId = typeof task.frameId === 'number' ? task.frameId : 0;
+  const target = { tabId: tab.id, frameIds: [evalFrameId] };
 
   let injection;
   try {
@@ -316,13 +319,32 @@ export async function evalTab(task) {
     if (s > bestScore) { bestScore = s; best = f; }
   }
 
+  // 只在主框架里执行时，失败要说明"可以换框架再试"，否则调用方会以为页面上没有这个东西
+  const frameHint = typeof task.frameId === 'number'
+    ? undefined
+    : '代码只在页面主框架里执行。若目标在 iframe 内，用 frames 查出 frameId 后用 --frameId 指定。';
+
   if (best.error) {
-    return { ok: false, error: 'page_script_error', message: best.error, url: tab.url, frameId: best.frameId };
+    return {
+      ok: false,
+      error: 'page_script_error',
+      message: best.error,
+      url: tab.url,
+      frameId: best.frameId,
+      hint: frameHint
+    };
   }
   const picked = { data: best.result, frameId: best.frameId, frameCount: frames.length };
   const data = picked.data;
   if (data && data.evalError) {
-    return { ok: false, error: 'eval_error', message: data.evalError, url: tab.url, frameId: picked.frameId };
+    return {
+      ok: false,
+      error: 'eval_error',
+      message: data.evalError,
+      url: tab.url,
+      frameId: picked.frameId,
+      hint: frameHint
+    };
   }
 
   const value = data ? data.value : null;
@@ -356,12 +378,26 @@ export async function screenshotTab(task) {
 
   const format = task.format === 'jpeg' ? 'jpeg' : 'png';
 
-  // 元素截图：先量出元素在页面坐标里的矩形
+  // 元素截图：先量出元素在页面坐标里的矩形。
+  // 主框架直接注入量；指定了子框架就交给 CDP——注入量到的坐标是那个框架自己的
+  // 坐标系，直接当 clip 用会截到页面别的区域。
   let clip = null;
   if (task.selector) {
-    clip = await elementRect(tab.id, task.selector, typeof task.frameId === 'number' ? task.frameId : 0);
+    const frameId = typeof task.frameId === 'number' ? task.frameId : 0;
+    clip = frameId === 0
+      ? await elementRectInMainFrame(tab.id, task.selector)
+      : await elementRectByCdp(tab.id, task.selector, frameId);
     if (!clip) {
-      return { ok: false, error: 'element_not_found', selector: task.selector, url: tab.url };
+      return {
+        ok: false,
+        error: 'element_not_found',
+        selector: task.selector,
+        frameId,
+        url: tab.url,
+        hint: frameId === 0
+          ? '元素不在主框架里。用 frames 动作查出它所在框架的 frameId，再用 --frameId 指定。'
+          : '该框架里没有命中这个选择器，或框架内容读不到（跨进程 iframe）。'
+      };
     }
   }
 
@@ -741,6 +777,33 @@ export async function grabTab(task) {
       await new Promise((r) => setTimeout(r, 300));
     }
 
+    // 从头到尾没有登记任何下载项：扩展侧接管失败，页面兜底的 <a download> 也没触发下载。
+    // 这种情况下文件不在磁盘上，报成功会让调用方以为已经拿到了。
+    if (downloadId === null) {
+      return {
+        ok: false,
+        error: 'download_not_tracked',
+        url: task.url,
+        fetchedBytes: fetched.bytes,
+        cdpPaused: paused,
+        hint: '页面已取到数据，但浏览器没有登记任何下载项，无法确认文件是否落盘。'
+      };
+    }
+
+    // 与 save 保持一致：中断就是失败，不能只看"下载项存在"
+    if (item && item.state === 'interrupted') {
+      return {
+        ok: false,
+        error: 'interrupted',
+        url: task.url,
+        downloadId,
+        fetchedBytes: fetched.bytes,
+        cdpPaused: paused,
+        reason: item.error || null,
+        hint: '下载被中断（服务端拒绝、磁盘不可写或被取消），文件没有完整落盘。'
+      };
+    }
+
     return {
       ok: true,
       data: {
@@ -990,13 +1053,18 @@ async function captureByCdp(tabId, format, clip, beyondViewport) {
   }
 }
 
-/** 量出元素在页面坐标里的矩形（供 CDP clip 使用），找不到返回 null。 */
+/**
+ * 量出主框架里元素在页面坐标里的矩形（供 CDP clip 使用），找不到返回 null。
+ *
+ * 只注入主框架：rectInPage 返回的是元素所在框架自己的页面坐标，跨框架拿来当
+ * clip 用会截到页面另一处的内容，比报错更难发现。iframe 里的元素走 elementRectByCdp。
+ */
 
-async function elementRect(tabId, selector, frameId) {
+async function elementRectInMainFrame(tabId, selector) {
   try {
     const injection = await withTimeout(
       chrome.scripting.executeScript({
-        target: typeof frameId === 'number' ? { tabId, frameIds: [frameId] } : { tabId, allFrames: true },
+        target: { tabId, frameIds: [0] },
         func: rectInPage,
         args: [selector]
       }),
@@ -1006,6 +1074,77 @@ async function elementRect(tabId, selector, frameId) {
     return hit ? hit.result : null;
   } catch (e) {
     return null;
+  }
+}
+
+/**
+ * 用 CDP 量出子框架里元素的矩形，返回主框架页面坐标。
+ *
+ * 走 CDP 而不是自己累加 iframe 偏移：DOM.getBoxModel 的坐标本来就相对主框架视口，
+ * 元素在 iframe 里也成立；自己找 iframe 元素再加偏移的做法在跨域、src 动态写入、
+ * 多层嵌套时都会算错，而错的坐标会安静地截出另一处画面。
+ *
+ * 量不到（跨进程 iframe 读不到内容文档、选择器没命中）返回 null，由调用方报找不到。
+ */
+
+async function elementRectByCdp(tabId, selector, frameId) {
+  const target = { tabId };
+  try {
+    await chrome.debugger.attach(target, '1.3');
+  } catch (e) {
+    return null;
+  }
+
+  try {
+    await chrome.debugger.sendCommand(target, 'DOM.enable');
+
+    // 先拿到该框架自身的文档节点
+    const owner = await chrome.debugger.sendCommand(target, 'DOM.getFrameOwner', { frameId });
+    if (!owner || typeof owner.backendNodeId !== 'number') { return null; }
+    const described = await chrome.debugger.sendCommand(target, 'DOM.describeNode', {
+      backendNodeId: owner.backendNodeId,
+      pierce: true
+    });
+    const contentDoc = described && described.node ? described.node.contentDocument : null;
+    if (!contentDoc || typeof contentDoc.nodeId !== 'number') { return null; }
+
+    const found = await chrome.debugger.sendCommand(target, 'DOM.querySelector', {
+      nodeId: contentDoc.nodeId,
+      selector
+    });
+    if (!found || typeof found.nodeId !== 'number' || found.nodeId === 0) { return null; }
+
+    const box = await chrome.debugger.sendCommand(target, 'DOM.getBoxModel', { nodeId: found.nodeId });
+    const quad = box && box.model ? box.model.content : null;
+    if (!quad || quad.length < 8) { return null; }
+
+    const xs = [quad[0], quad[2], quad[4], quad[6]];
+    const ys = [quad[1], quad[3], quad[5], quad[7]];
+    const x = Math.min.apply(null, xs);
+    const y = Math.min.apply(null, ys);
+    const width = Math.max.apply(null, xs) - x;
+    const height = Math.max.apply(null, ys) - y;
+    if (!width || !height) { return null; }
+
+    // CDP 给的是视口坐标，clip 要的是页面坐标，补上主框架的滚动偏移
+    let scrollX = 0;
+    let scrollY = 0;
+    try {
+      const metrics = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics');
+      const viewport = metrics && metrics.cssVisualViewport;
+      if (viewport) {
+        scrollX = viewport.pageX || 0;
+        scrollY = viewport.pageY || 0;
+      }
+    } catch (e) {
+      // 拿不到滚动偏移就按未滚动处理；比直接放弃截图更接近预期
+    }
+
+    return { x: x + scrollX, y: y + scrollY, width, height, scale: 1 };
+  } catch (e) {
+    return null;
+  } finally {
+    try { await chrome.debugger.detach(target); } catch (e) { /* 忽略 */ }
   }
 }
 
@@ -1026,6 +1165,17 @@ export async function linksTab(task) {
   if (picked.error) { return { ...picked.error, url: tab.url }; }
   const data = picked.data;
 
+  // 页面侧说选择器没命中：这是失败，不能当成"页面里没有链接"报成功
+  if (data.error) {
+    return {
+      ok: false,
+      error: data.error,
+      selector: task.selector,
+      url: tab.url,
+      hint: '选择器在所有框架里都没有命中元素。可用 frames 查看框架，或用 read --returnHtml 看结构。'
+    };
+  }
+
   return {
     ok: true,
     data: {
@@ -1033,6 +1183,8 @@ export async function linksTab(task) {
       wasActive: !!tab.active,
       title: tab.title || '',
       url: tab.url || '',
+      frameId: picked.frameId,
+      frameCount: picked.frameCount,
       links: data.links,
       usedSelector: data.usedSelector
     }
@@ -1117,9 +1269,16 @@ export async function clickTab(task) {
  *
  * chrome.tabs.update 返回时导航尚未提交，此刻读 tab.url 仍是旧地址。
  * 若不等待，调用方紧接着 read 会匹配到旧页面甚至报 no_tab_matched。
+ *
+ * fromUrl 是导航前的地址（新建标签页时没有，传 undefined）。它用来挡住
+ * chrome.tabs.update 刚返回、新导航还没开始的这一小段：此时读到的仍是旧地址、
+ * status 仍是 complete，会被误判成"服务端重定向"而立刻按旧地址返回。
+ *
+ * 命中判断只看去掉 # 之后的完整地址，不能用前缀包含：当前地址是目标的超集时
+ * （例如当前 /doc?id=1、目标是 /doc）前缀包含会把旧地址当成功。
  */
 
-async function waitForTabUrl(tabId, targetUrl, timeoutMs = 10000) {
+async function waitForTabUrl(tabId, targetUrl, timeoutMs = 10000, fromUrl) {
   const base = String(targetUrl).split('#')[0];
   const deadline = Date.now() + timeoutMs;
   let last = '';
@@ -1129,11 +1288,12 @@ async function waitForTabUrl(tabId, targetUrl, timeoutMs = 10000) {
     if (!t) { return { url: null, tabGone: true }; }
 
     last = t.url || '';
-    if (last === targetUrl || last.startsWith(base)) {
+    const settled = last.split('#')[0];
+    if (last === targetUrl || settled === base) {
       return { url: last };
     }
-    // 加载已完成但地址不同，通常是服务端重定向，按实际地址返回
-    if (t.status === 'complete') {
+    // 加载已完成但地址已不是导航前那个，通常是服务端重定向，按实际地址返回
+    if (t.status === 'complete' && last !== fromUrl) {
       return { url: last, redirected: true };
     }
     if (Date.now() >= deadline) {
@@ -1213,7 +1373,7 @@ export async function navigateTab(task) {
   await chrome.tabs.update(tab.id, { url: target });
 
   // 关键：等待地址真正变更后再返回，否则调用方紧接着匹配会落空
-  const settled = await waitForTabUrl(tab.id, target, waitMs);
+  const settled = await waitForTabUrl(tab.id, target, waitMs, urlBefore);
 
   return {
     ok: true,

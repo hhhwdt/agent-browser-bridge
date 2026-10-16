@@ -27,7 +27,7 @@
  *     not_a_link               目标不是链接
  *     not_editable             目标不可编辑
  *     timeout                  扩展未在超时内返回
- *   完整错误码见 README.txt。
+ *   常见错误码及成因另见 docs/QUICKSTART.md 末尾的排查表。
  */
 
 'use strict';

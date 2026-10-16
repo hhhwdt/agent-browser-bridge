@@ -364,6 +364,10 @@ export function linksInPage(selector, filterText) {
     links: out,
     usedSelector: selector || 'document',
     isMainFrame: (function () { try { return window === window.top; } catch (e) { return false; } })(),
+    // 供多框架注入时挑选结果：指定了选择器且走到这里，说明该框架命中了。
+    // 少了这个字段，调用方的框架打分里那档"命中加权"永远不生效，多个框架都命中时
+    // 只能退回第一个框架，iframe 内的链接就再也找不到。
+    selectorMatched: !!selector,
     href: location.href
   };
 }
@@ -1256,13 +1260,15 @@ export function readStorageInPage(includeLocal, includeSession, key) {
     const out = {};
     if (key) {
       out[key] = store.getItem(key);
-      return out;
+    } else {
+      const len = Math.min(store.length, 300);
+      for (let i = 0; i < len; i++) {
+        const k = store.key(i);
+        out[k] = store.getItem(k);
+      }
     }
-    const len = Math.min(store.length, 300);
-    for (let i = 0; i < len; i++) {
-      const k = store.key(i);
-      out[k] = store.getItem(k);
-    }
+    // 截断必须对单 key 也生效：指定 key 取到的往往正是一整块缓存或 token，
+    // 不截断就会把几百 KB 原样塞进命令行输出与 /result 回传。
     for (const k of Object.keys(out)) {
       if (typeof out[k] === 'string' && out[k].length > MAX) {
         out[k] = out[k].slice(0, MAX) + '…[截断]';

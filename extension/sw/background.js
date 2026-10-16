@@ -427,23 +427,8 @@ function bootstrap() {
  * ------------------------------------------------------------------ */
 
 // 定时唤醒。个别浏览器对最小周期有限制，失败则退回 1 分钟。
-try {
-  chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
-} catch (e) {
-  try {
-    chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 1 });
-  } catch (e2) {
-    logError('alarms.create', e2);
-  }
-}
-try {
-  chrome.runtime.onStartup.addListener(bootstrap);
-  chrome.runtime.onInstalled.addListener(bootstrap);
-} catch (e) {
-  logError('runtime.listeners', e);
-}
-bootstrap();
-// 定时唤醒。个别浏览器对最小周期有限制，失败则退回 1 分钟。
+// 这段只能出现一次：bootstrap 里的 bumpBootCount 每次都会 +1，重复注册会让
+// diag 报出的"SW 启动次数"翻倍，而它正是判断服务脚本是否被频繁回收的依据。
 try {
   chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
 } catch (e) {

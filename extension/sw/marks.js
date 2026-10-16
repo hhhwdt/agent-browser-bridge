@@ -127,7 +127,12 @@ async function applyBadge(tabId, tip, kind) {
   markedTabs.add(tabId);
 }
 
-/** 清除标签页徽标标记。 */
+/**
+ * 清除标签页徽标标记。
+ *
+ * 返回页面内的那部分标记（标题前缀、图标角点）是否也清掉了：徽标由扩展自己维护，
+ * 一定能清；页面内的要靠注入，冻结的标签页清不掉。调用方需要据此如实报出失败项。
+ */
 
 export async function removeBadge(tabId) {
   try {
@@ -136,8 +141,9 @@ export async function removeBadge(tabId) {
   } catch (e) {
     // 标签页可能已关闭
   }
-  await unmarkFavicon(tabId);
+  const favicon = await unmarkFavicon(tabId);
   markedTabs.delete(tabId);
+  return !!(favicon && favicon.ok);
 }
 
 /** 在页面内显示浮动提示。失败不影响主流程。 */
@@ -291,26 +297,33 @@ export async function unmarkTask(task) {
 
   // 并行清除：串行时每个冻结标签页都会累积一次注入超时，
   // 三个标签页就能把一次 unmark 拖到几十秒。并行后总耗时约等于单个最慢者。
-  const results = await Promise.allSettled(
+  //
+  // 失败判据必须取返回值，不能取 Promise 的 rejected：removeBadge 与 hideIndicator
+  // 内部都吞掉了异常，用 rejected 判断的话 failed 永远是空的，页面里清不掉的标记
+  // 就再也没人告诉用户。
+  const settled = await Promise.allSettled(
     targets.map(async (id) => {
-      await removeBadge(id);
-      const ok = await hideIndicator(id);
-      return { id, indicatorCleared: ok };
+      const pageCleared = await removeBadge(id);
+      const indicatorCleared = await hideIndicator(id);
+      return { id, pageCleared: pageCleared && indicatorCleared };
     })
   );
 
-  const failed = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
+  const failed = settled
+    .map((r, i) => (r.status === 'rejected' || !r.value.pageCleared ? targets[i] : null))
+    .filter((id) => id !== null);
   await saveMarks();
 
   return {
     ok: true,
     data: {
       cleared: targets,
+      failed,
       browser: BROWSER_NAME,
       markedCount: markedTabs.size,
-      // 冻结/无响应的标签页无法注入，标记要等它被打开或刷新后才能清掉
+      // 冻结/无响应的标签页注入不进去，页面里的标记要等它被打开或刷新后才能清掉
       note: failed.length
-        ? `${failed.length} 个标签页无响应，其标记需在浏览器中打开或刷新该标签页后再清除`
+        ? `${failed.length} 个标签页无响应，页面上的标记需在浏览器中打开或刷新该标签页后再清除`
         : undefined
     }
   };
