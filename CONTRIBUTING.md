@@ -8,6 +8,11 @@ If you only read one file before changing something, read [docs/ARCHITECTURE.md]
 It says where things live, why, and which mistakes this codebase has already made. Most of what is
 below is that file's rules restated as things a pull request is checked against.
 
+Looking for something to work on? [docs/ROADMAP.md](docs/ROADMAP.md) lists the directions that are
+planned, each with where the change goes, what would make it done, and which parts are still open
+questions. An item whose "needs a decision first" column says yes should be discussed in an issue
+before you write code.
+
 ## Running it
 
 ```bash
