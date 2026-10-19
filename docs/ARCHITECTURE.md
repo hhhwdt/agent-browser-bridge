@@ -28,7 +28,7 @@ made so you do not repeat them.
    the page, with the user's own logged-in session
 ```
 
-Two things about this shape are worth internalising:
+Two things about this shape matter:
 
 **The extension polls; the bridge never pushes.** A service worker cannot listen on a port, so the
 direction is inverted: `GET /poll` is held open for 25 seconds, and a task is answered on that held
@@ -89,7 +89,7 @@ The dependency direction is one-way and there are no cycles. `background.js` is 
 registers event listeners; `actions.js` is the only one that touches a page indirectly.
 
 `extension/sw/package.json` contains one line, `{"type": "module"}`. Chrome already knows these are
-modules — the manifest says so — but Node does not, and Node is what the offline tests use to load
+modules because the manifest says so; Node does not, and Node is what the offline tests use to load
 the whole graph.
 
 ### The invariant that matters
@@ -119,7 +119,7 @@ Be aware of the honest answer first: **an action is currently described in five 
 That is the weakest part of the design. A registry that generated the tool schema, the route and the
 client method from one description would remove three of those edits, and it is the natural next
 structural change if the action count keeps growing. It has not been done because the presentations
-genuinely differ — the MCP schema needs descriptions, the CLI needs argument parsing — and a
+genuinely differ (the MCP schema needs descriptions, the CLI needs argument parsing), and a
 half-generic version would be worse than the duplication.
 
 ## Hard-won constraints
@@ -131,7 +131,7 @@ Each of these is a bug that shipped. They are short; the cost of rediscovering t
 
 **Do not report a timeout for work that succeeded.** `dispatch()` gives the first browser a shorter
 budget before trying the next one, on the theory that a tab living elsewhere answers
-`no_tab_matched` immediately. It was 8 seconds, and clearing marks took 8.1 — so the caller was told
+`no_tab_matched` immediately. It was 8 seconds, and clearing marks took 8.1, so the caller was told
 `timeout` while the marks had in fact been cleared. Tasks with no tab to find now get the full
 budget, and the cap for the rest is above the extension's own 12-second injection budget.
 

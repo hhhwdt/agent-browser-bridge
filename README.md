@@ -6,7 +6,7 @@
 focus.**
 
 A browser extension plus a small local server. An agent gets to read pages, click, type, wait, take
-screenshots and save files — on your real, already-logged-in session, on any tab, **including
+screenshots and save files on your real, already-logged-in session, on any tab, **including
 background tabs**, while you keep working in another window.
 
 [简体中文](README.zh-CN.md) · English · [Quickstart](docs/QUICKSTART.md)
@@ -14,7 +14,7 @@ background tabs**, while you keep working in another window.
 ---
 
 > **Read this before you install.** Once the bridge is running, any program on this machine that
-> can reach its port can act in your browser with your own logged-in session — including while you
+> can reach its port can act in your browser with your own logged-in session, including while you
 > are not watching. [DISCLAIMER.md](docs/DISCLAIMER.md) explains what it can do, what you have to judge
 > for yourself, and what it is not for. The threat model and the gaps that are *not* closed are in
 > [SECURITY.md](docs/SECURITY.md); what it reads and stores is in [PRIVACY.md](docs/PRIVACY.md).
@@ -126,15 +126,15 @@ Chrome and Edge run side by side, fully isolated, with automatic routing.
 
 Optional, only for pulling media off sites whose streams are fragmented:
 
-- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) — handles HLS/DASH and a very long list of sites
-- `ffmpeg` — merges the fragments `yt-dlp` downloads
+- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp): handles HLS/DASH and a very long list of sites
+- `ffmpeg`: merges the fragments `yt-dlp` downloads
 
 The bridge works fine without them; they are for the download use case.
 
 ## Install
 
 > `node src/setup.js` walks every step below and reports which one is missing, with the next action for
-> it. Re-run it whenever something stops working — it is the fastest way to find out which layer is
+> it. Re-run it whenever something stops working; it is the fastest way to find out which layer is
 > at fault.
 
 **0. What you need**
@@ -144,7 +144,7 @@ The bridge works fine without them; they are for the download use case.
 
 The extension is loaded from source. There is no extension-store listing: this tool needs the
 `debugger` permission, executes code that a local program supplies at run time, and asks for site
-access — a combination store review policies treat as remote code execution and remote control.
+access, a combination store review policies treat as remote code execution and remote control.
 
 **1. Start the bridge**
 
@@ -168,7 +168,7 @@ npm i -g agent-browser-bridge  # the same, once the package is published
 
 That gives `agent-browser-bridge` (the bridge), `agent-browser-bridge-setup` (the self-check) and
 `agent-browser-bridge-mcp` (the MCP server for the agent). The package carries `extension/` as well,
-so the self-check prints the folder to load in step 2 — no clone needed on the machine that only
+so the self-check prints the folder to load in step 2; no clone needed on the machine that only
 *runs* the bridge.
 
 **2. Load the extension**
@@ -179,7 +179,7 @@ so the self-check prints the folder to load in step 2 — no clone needed on the
 **3. Grant site access**
 
 Nothing is authorised by default. Click the extension icon and grant the sites you want it to work
-on — one hostname at a time, or all sites. The browser's own permission prompt is what enforces
+on, one hostname at a time or all sites. The browser's own permission prompt is what enforces
 this, so you stay in control.
 
 > **Upgrading from 1.4.x:** the manifest now carries a public key, which fixes the extension ID.
@@ -201,15 +201,15 @@ decided them for us:
 | `cookies` | **optional** | powers `session`. Requested only when you press the button in the popup; until then `session` returns `permission_not_granted`. Note the scope: once granted it covers cookies on **every** open tab, not only the sites you authorised |
 | host access (`*://*/*`) | **optional** | granted per site from the popup, never at install time |
 
-If you would rather not hand over `debugger`, delete `upload`, `screenshot` and `grab` — nothing
+If you would rather not hand over `debugger`, delete `upload`, `screenshot` and `grab`; nothing
 else depends on it.
 
 ## Use it from an agent (MCP)
 
-The bridge speaks MCP, so any MCP-capable agent — Claude Code, Cursor, Cline, Windsurf — can drive
+The bridge speaks MCP, so any MCP-capable agent (Claude Code, Cursor, Cline, Windsurf) can drive
 your browser with one config line, and no code.
 
-From the repository root, let the shell fill in the path — nothing to type, nothing hard-coded:
+From the repository root, let the shell fill in the path; nothing to type, nothing hard-coded:
 
 ```bash
 claude mcp add -s user browser -- node "$PWD/src/mcp.js"      # macOS, Linux, Git Bash
@@ -234,14 +234,14 @@ Or put it in a project's `.mcp.json`, where the path is relative and the client 
 ```
 
 Whichever you pick, `-s user` makes the server available in every project. The client stores a
-resolved path at registration time — that is its business, not something this repository hard-codes.
+resolved path at registration time; that is its business, not something this repository hard-codes.
 
 17 tools, all prefixed `browser_`: `list_tabs`, `read_page`, `get_links`, `navigate`, `click`,
 `type`, `press_key`, `wait_for`, `screenshot`, `eval`, `frames`, `save_file`, `upload_file`,
 `session`, `close_tab`, `clear_marks`, `status`. `node src/mcp.js --list-tools` prints them with the
 arguments each one requires.
 
-Three things worth knowing:
+Three things to know:
 
 - **It starts the bridge for you.** If the port is dead, the first tool call spawns `src/server.js` in
   the background. There is no separate service to remember to start; end that node process when you
@@ -257,7 +257,7 @@ The server also sends an `instructions` block when an agent connects: list tabs 
 new tabs in the background, close what you opened, clear marks when done, ask before anything
 irreversible. That discipline lives with the server rather than in each user's prompt.
 
-None of this removes the install steps above — you still need Node, the bridge and the loaded
+None of this removes the install steps above; you still need Node, the bridge and the loaded
 extension. What MCP removes is the *integration* step: nobody writes code against `src/client.js`.
 
 ## Usage
@@ -402,11 +402,11 @@ flowchart TD
 | Where it lands | the path you give it | download dir + `videos/` | download dir + `videos/` |
 
 `save` and `grab` deliberately share a destination (`<browser download dir>/videos/`), so media
-from either path — and from an external downloader pointed at the same folder — ends up together.
+from either path (and from an external downloader pointed at the same folder) ends up together.
 
 **Why `grab` has to exist.** `Referer` is a forbidden header for XHR/fetch *and* for the
 `downloads` API, so a script cannot attach it. `declarativeNetRequest` can set it, but does **not**
-apply to extension-initiated downloads — all three of these were verified experimentally, and each
+apply to extension-initiated downloads; all three of these were verified experimentally, and each
 one fails in its own way. So `save` inevitably gets a 403 from a hotlink-protected CDN, and
 `download` inevitably gets `Failed to fetch` from CORS. `grab` sidesteps both by letting the *page*
 make the request (correct `Referer`, for free) while CDP injects `Access-Control-Allow-Origin` into
@@ -416,7 +416,7 @@ the response so the page is allowed to read it.
 # absolute URL
 node src/cli.js save --url "https://cdn.example.com/clip.mp4" --filename "clip.mp4"
 
-# relative URL — resolved against the matched tab's own URL
+# relative URL: resolved against the matched tab's own URL
 node src/cli.js save --match "example.com/gallery" --url "/media/photo-01.jpg"
 ```
 
@@ -433,7 +433,7 @@ returns every candidate it can find:
 - HLS/DASH manifests and direct links scraped from the page's own data
 - content-sized images (UI icons are filtered out by rendered dimensions)
 
-`blob:` sources are reported as such rather than hidden, because those are in-memory handles — you
+`blob:` sources are reported as such rather than hidden, because those are in-memory handles; you
 have to locate the underlying stream before anything can be downloaded.
 
 ```bash
@@ -448,13 +448,13 @@ streams, hand the manifest URL to `yt-dlp` instead and let it download and merge
 
 Every tab an agent touches is marked, two ways:
 
-- **A dot on the favicon** — the site's icon is redrawn with a coloured dot composited in, and
+- **A dot on the favicon**: the site's icon is redrawn with a coloured dot composited in, and
   written back to every `<link rel="icon">`. The colour tracks the operation: read, click, type,
   navigate.
 - **A prefix on the tab title.**
 
 Both clear themselves after a few minutes (the page schedules its own cleanup, so even a frozen
-background tab tidies up when you next visit it), and both can be cleared on demand — from the
+background tab tidies up when you next visit it), and both can be cleared on demand: from the
 extension popup, or with `read.js unmark`.
 
 Inside the page itself, `click` / `type` / `key` also drive a **virtual cursor**: an arrow that
@@ -466,7 +466,7 @@ Two details that cost real debugging time, in case you touch this code:
 
 - The favicon link's `type` **must** be updated to `image/png` when swapping in a PNG data URL.
   Leaving it as `image/x-icon` makes the browser fail to decode it and silently fall back to the
-  original icon — the DOM looks correct while the tab bar shows nothing.
+  original icon; the DOM looks correct while the tab bar shows nothing.
 - A page that rewrites `document.title` (dashboards, SPAs) will drop the title mark, leaving a
   half-mark. Cleanup therefore discovers marked tabs by **either** the title prefix or the tab's
   `favIconUrl`, not the title alone.
@@ -496,7 +496,7 @@ something in practice:
 - Validates the `Origin` header and rejects any request that carries a non-local one, so a page
   cannot drive the extension through `fetch` or a form post. The limit: requests sent with *no*
   `Origin` header at all (`<img>`, `<script>`, prefetch) are accepted, because that is how local
-  scripts talk to the bridge — and how the extension itself talks to it. Such a request can neither
+  scripts talk to the bridge, and how the extension itself talks to it. Such a request can neither
   read a response nor post a task result, but it can trigger a `/tabs` dispatch and hold the poll
   slot, which costs the next task its delivery.
 - Site access is **denied by default**, enforced by the browser's permission system. The install
@@ -531,7 +531,7 @@ What is deliberately *outside* this model (same-user processes, the user themsel
 
 Two entry points need no configuration at all.
 
-**Offline** — no browser, no test page, and no interference with a bridge you already have running.
+**Offline**: no browser, no test page, and no interference with a bridge you already have running.
 Each suite starts its own bridge on a throwaway port, or drives the extension's injected functions
 against a stand-in DOM.
 
@@ -564,12 +564,12 @@ node test/test-offline.js        # all of the suites below, then a summary
 | `test-lease.js` | lease acquisition and release — the failure mode where two agents interleave on the same tab with no ordering guarantee |
 
 `test-mcp.js` skips its live section when `ABB_MCP_OFFLINE=1` is set, which is what CI uses. The same
-suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22) — Windows is this tool's main
+suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22). Windows is this tool's main
 platform, so it is not left to a single Ubuntu job to prove.
 
 `test/` and `tools/` exist in a clone only; they are not part of the published package.
 
-**Live** — a real browser, still no configuration. It uses the bridge's own address as the page under
+**Live**: a real browser, still no configuration. It uses the bridge's own address as the page under
 test, which the manifest already permits, so there is no site to grant:
 
 ```bash
@@ -586,11 +586,11 @@ node test/test-cli.js            # 22 assertions, one per subcommand
 ```
 
 Same idea, one layer up: it opens one background tab and runs every CLI subcommand against it,
-asserting each still prints what it is supposed to. That is how a long-standing bug surfaced —
+asserting each still prints what it is supposed to. That is how a long-standing bug surfaced:
 `click --dryRun` had been reading a field the dry run does not return, so only the human-readable
 output was broken while `--json` looked fine.
 
-**Configured** — these need a page you control:
+**Configured** (needs a page you control):
 
 ```bash
 cp test/test-config.example.js test/test-config.js   # then edit it
@@ -637,7 +637,7 @@ directory named for what it is. `src/cli.js` and `src/mcp.js` are also declared 
 so an installed copy is reached as `agent-browser-bridge` / `agent-browser-bridge-mcp` instead of by
 path.
 
-Two things worth knowing as a contributor:
+Two things to know before you touch the code:
 
 - The extension's service worker is the only part that touches a page, and its
   `sw/injected.js` is special: those functions are serialised into the page, so each one has to be
@@ -650,7 +650,7 @@ Two things worth knowing as a contributor:
 
 - The browser must be running with the extension enabled.
 - A page must have been loaded at least once; never-rendered content cannot be read.
-- `key` dispatches synthetic events — they trigger in-page handlers but do not produce text and
+- `key` dispatches synthetic events: they trigger in-page handlers but do not produce text and
   cannot trigger browser-level shortcuts. Use `type` for text.
 - Editing UIs that only mount when the tab is visible need the tab foregrounded once.
 - **Streams whose source is a `blob:` URL cannot be saved directly.** Those are in-memory handles,
@@ -668,7 +668,7 @@ Two things worth knowing as a contributor:
 
 ## Contributing
 
-Bug reports, translations and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
+Bug reports, translations and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 how to run the tests, the rules this codebase holds itself to, and the one deadlock worth knowing
 about before you reload the extension. Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
@@ -676,4 +676,4 @@ Report vulnerabilities privately, not in a public issue: [SECURITY.md](docs/SECU
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT; see [LICENSE](LICENSE).

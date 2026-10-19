@@ -1,6 +1,6 @@
 # Quickstart
 
-From nothing to an agent driving your browser. Six steps, one of which is a click you have to make
+From nothing to an agent driving your browser. Eight steps, two of which are clicks you have to make
 yourself.
 
 [简体中文](QUICKSTART.zh-CN.md) · English
@@ -28,7 +28,7 @@ cd agent-browser-bridge
 node src/setup.js
 ```
 
-It walks the layers — Node, the bridge, the extension, site grants, the MCP registration — and says
+It walks the layers (Node, the bridge, the extension, site grants, the MCP registration) and says
 which one is missing and what to do next. Run it again after each step below; it is idempotent. The
 last thing it does is open a background tab, read it and close it, so a clean run means the whole
 path works. It only reads: where a command is needed it prints it rather than changing your
@@ -43,13 +43,13 @@ configuration.
 The extension appears with a puzzle-piece icon. Pin it to the toolbar if you like.
 
 > There is no extension-store listing, and there will not be one: the tool needs the `debugger`
-> permission, runs code that a local program supplies at runtime, and asks for site access — a
+> permission, runs code that a local program supplies at runtime, and asks for site access, a
 > combination store policies treat as remote code execution and remote control. Loading unpacked is
 > the supported path.
 
 ## 4. Grant the sites you want it to work on
 
-Click the extension icon. Nothing is authorised yet — this is the step no program can do for you,
+Click the extension icon. Nothing is authorised yet. This is the step no program can do for you,
 because the browser requires a real click from you.
 
 - Type a hostname (e.g. `confluence.example.com`) and press **授权 / Grant**, or
@@ -72,7 +72,7 @@ Or run `node src/cli.js token --show` to print the token.
 
 ## 6. Add the MCP server
 
-From the repository root — the shell fills in the path, so there is nothing to type or hard-code:
+From the repository root; the shell fills in the path, so there is nothing to type or hard-code:
 
 ```bash
 claude mcp add -s user browser -- node "$PWD/src/mcp.js"      # macOS, Linux, Git Bash
@@ -119,7 +119,7 @@ sites it may touch, and what counts as an action it must ask about first.
 
 ```bash
 node src/mcp.js --list-tools     # the tool list and their required arguments
-node test/test-offline.js         # 9 suites, no browser, no configuration — the fastest signal
+node test/test-offline.js         # 21 suites, no browser, no configuration, the fastest signal
 node test/test-live.js            # opens a background tab and exercises the real browser
 node src/cli.js diag            # extension version, id, connection, recent errors
 ```
@@ -132,7 +132,7 @@ node src/cli.js diag            # extension version, id, connection, recent erro
 | `permission_not_granted` | The `session` tool needs the optional `cookies` permission. |
 | `token_required` | The bridge is running but the extension has no token. Paste the token into the popup (step 5). |
 | `tab_unresponsive` | That tab's renderer is frozen. Run `activate` then retry, or use `--auto-activate`. |
-| Everything times out | Check `node src/cli.js diag` — most often the wrong browser or a dead extension. |
+| Everything times out | Check `node src/cli.js diag` first; most often the wrong browser or a dead extension. |
 
 ## What is where
 
@@ -140,7 +140,7 @@ node src/cli.js diag            # extension version, id, connection, recent erro
 |---|---|
 | `extension/` | the browser extension (MV3) |
 | `src/server.js` | the local bridge, `127.0.0.1:18777`, no dependencies |
-| `src/mcp.js` | the MCP server — this is what your agent talks to |
+| `src/mcp.js` | the MCP server, what your agent talks to |
 | `src/client.js` | client library, if you would rather call the bridge from your own code |
 | `src/cli.js` | the same thing from the command line |
 | `scripts/` | Windows helpers: autostart at logon, start/restart the bridge |
@@ -168,13 +168,13 @@ Two things worth saying up front, because both surprise people:
 
 - **The extension is not in a store, and will not be.** Chrome nags about developer-mode extensions
   at every start. That is the price of the `debugger` permission plus executing code a local program
-  supplies at run time — a combination store review treats as remote code execution and remote
+  supplies at run time, a combination store review treats as remote code execution and remote
   control.
 - **It drives their real, logged-in browser.** Anything they are signed into is reachable by whatever
   local program can reach the bridge port. [DISCLAIMER.md](DISCLAIMER.md) is short; send it along.
 
 For a version with **no path anywhere**, publish to npm first: they then run
-`npm i -g agent-browser-bridge` and use the command names — `agent-browser-bridge` for the bridge,
-`agent-browser-bridge-setup` for the self-check above, `agent-browser-bridge-mcp` for step 4 — with
+`npm i -g agent-browser-bridge` and use the command names (`agent-browser-bridge` for the bridge,
+`agent-browser-bridge-setup` for the self-check above, `agent-browser-bridge-mcp` for step 4) with
 no clone and no path to copy. The package carries `extension/`, so step 2 still works: the
 self-check prints the folder to load.

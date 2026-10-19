@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/hhhwdt/agent-browser-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/hhhwdt/agent-browser-bridge/actions/workflows/ci.yml)
 
-**让本机 AI agent 操控你已经打开的那个浏览器 —— 完全后台运行，不抢焦点。**
+**让本机 AI agent 操控你已经打开的那个浏览器：完全后台运行，不抢焦点。**
 
 一个浏览器扩展加一个本地小服务。agent 能读页面、点击、输入、等待、截图、存文件，用的都是你
 **真实且已登录**的会话；任意标签页都能操作，**包括后台标签页**，而你可以在别的窗口照常干活。
@@ -47,12 +47,12 @@
 ## 它解决什么问题
 
 几乎所有浏览器自动化都是**新开一个浏览器**：没有登录态、没有 Cookie、没有扩展，还会弹出一个
-窗口盖住你正在做的事。一旦页面需要 SSO 就彻底失效 —— 而值得自动化的页面大多都需要 SSO。
+窗口盖住你正在做的事。一旦页面需要 SSO 就彻底失效，而值得自动化的页面大多都需要 SSO。
 
 这个项目反着来：它挂到**已经在运行、已经登录**的浏览器上，所以 agent 动手之前，每个页面就已经
 是登录态。
 
-它也处理真实网站的麻烦之处 —— 这些正是朴素自动化最容易翻车的地方：编辑器藏在 `iframe` 里、
+它也处理真实网站里那些最容易让朴素自动化翻车的麻烦：编辑器藏在 `iframe` 里、
 编辑器用 `designMode` 而不是 `contenteditable`、UI 只在标签页可见时才渲染、按钮监听的是
 `mousedown` 而不是 `click`、标签页被浏览器冻结、下载链接拒绝没有 `Referer` 的请求、
 CDN 拒绝跨域读取。
@@ -87,7 +87,7 @@ sequenceDiagram
 ```
 
 因为一切通过 `chrome.scripting.executeScript` 完成，标签页**永远不会被激活**，鼠标不会移动，
-也不会发送任何模拟按键。后台标签页和你正在看的那个一样好用 —— 这正是关键所在。
+也不会发送任何模拟按键。后台标签页和你正在看的那个一样好用，这正是关键所在。
 
 ## 能做什么
 
@@ -125,15 +125,15 @@ Chrome 与 Edge 可同时使用，彼此完全隔离，且自动选路。
 
 以下可选，仅在需要下载分片流媒体时使用：
 
-- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) —— 处理 HLS/DASH，支持站点极多
-- `ffmpeg` —— 合并 `yt-dlp` 下载的分片
+- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)：处理 HLS/DASH，支持的站点很多
+- `ffmpeg`：合并 `yt-dlp` 下载的分片
 
 不用它们，桥接服务本身照常工作。
 
 ## 安装
 
 > `node src/setup.js` 会把下面每一步都查一遍，告诉你缺的是哪一步、下一步该做什么。
-> 出问题时先跑它——定位到具体哪一层最快的方式。
+> 出问题时先跑它，能最快定位是哪一层的问题。
 
 **0. 需要什么**
 
@@ -141,7 +141,7 @@ Chrome 与 Edge 可同时使用，彼此完全隔离，且自动选路。
 - Chrome、Edge 或其他 Chromium 内核浏览器。
 
 扩展从源码加载，没有商店版本。它需要 `debugger` 权限、会执行本机程序在运行时传入的代码、
-还要求站点访问权限——这几条放在一起，会被商店审核判为远程代码执行与远程控制。
+还要求站点访问权限。这几条放在一起，会被商店审核判为远程代码执行与远程控制。
 
 **1. 启动桥接服务**
 
@@ -165,7 +165,7 @@ npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个�
 
 装上之后有 `agent-browser-bridge`（桥接）、`agent-browser-bridge-setup`（自检）、
 `agent-browser-bridge-mcp`（给 agent 用的 MCP 服务）。包里同时带着 `extension/`，第 2 步要选的
-目录由自检命令直接打印出来 —— 只负责**运行**桥接的机器不需要克隆仓库。
+目录由自检命令直接打印出来，只负责**运行**桥接的机器不需要克隆仓库。
 
 **2. 加载扩展**
 
@@ -196,12 +196,12 @@ npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个�
 
 ## 权限模型
 
-安装时的索取刻意保持最小。有两件事值得说明 —— 它们是 Chrome 的规则决定的，不是我们的选择：
+安装时的索取刻意保持最小。其中两处是 Chrome 的规则决定的，不是我们的选择：
 
 | 权限 | 状态 | 用途与原因 |
 |---|---|---|
 | `tabs` `scripting` `storage` `alarms` | 必需 | 核心能力：找标签页、注入脚本、维持连接 |
-| `debugger` | **必需** | 支撑 `upload`、CDP 截图与 `grab`。Chrome **禁止**它作为可选权限 —— 写成可选会被直接丢弃并在扩展页报错，所以只能是必需 |
+| `debugger` | **必需** | 支撑 `upload`、CDP 截图与 `grab`。Chrome **禁止**它作为可选权限：写成可选会被直接丢弃并在扩展页报错，所以只能是必需 |
 | `downloads` | **必需** | 支撑 `save` 与 `grab` |
 | `cookies` | **可选** | 支撑 `session`。只有你在弹窗里点「授予」才会申请；在此之前 `session` 返回 `permission_not_granted`。注意范围：授予后对**所有**已打开标签页的 Cookie 生效，不止你授权过的站点 |
 | 站点访问（`*://*/*`） | **可选** | 由弹窗逐站授予，安装时绝不索取 |
@@ -209,7 +209,7 @@ npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个�
 桥接服务还会在配置目录生成一个 token 文件（`%APPDATA%\agent-browser-bridge\token` 或
 `~/.config/agent-browser-bridge/token`），扩展凭此证明身份。其他扩展无法读取该文件。
 
-如果你不想把 `debugger` 交出去，删掉 `upload`、`screenshot`、`grab` 三个动作即可 —— 其他功能
+如果你不想把 `debugger` 交出去，删掉 `upload`、`screenshot`、`grab` 三个动作即可，其他功能
 不依赖它。
 
 ## 给 agent 用（MCP）
@@ -217,7 +217,7 @@ npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个�
 桥接会说 MCP，所以任何支持 MCP 的 agent（Claude Code、Cursor、Cline、Windsurf）配一行就能用，
 不用写代码。
 
-在仓库根目录执行，路径交给 shell 填——不用手打，也不用写死：
+在仓库根目录执行，路径交给 shell 填，不用手打，也不用写死：
 
 ```bash
 claude mcp add -s user browser -- node "$PWD/src/mcp.js"      # macOS / Linux / Git Bash
@@ -241,7 +241,7 @@ claude mcp add -s user browser -- agent-browser-bridge-mcp
 }
 ```
 
-三种都行；`-s user` 表示所有项目里都能用。客户端会在注册那一刻把路径解析成实际值存起来——那是它的
+三种都行；`-s user` 表示所有项目里都能用。客户端会在注册那一刻把路径解析成实际值存起来。那是它的
 事，仓库里不写死任何路径。
 
 共 17 个工具，统一 `browser_` 前缀：`list_tabs`、`read_page`、`get_links`、`navigate`、`click`、
@@ -249,7 +249,7 @@ claude mcp add -s user browser -- agent-browser-bridge-mcp
 `session`、`close_tab`、`clear_marks`、`status`。`node src/mcp.js --list-tools` 会打印完整清单和各自的
 必填参数。
 
-三点需要知道：
+先说三件事：
 
 - **它会把桥接服务拉起来。** 端口上没服务时，第一次工具调用会在后台启动 `src/server.js`，不用你记得
   先起服务。不想要了就结束那个 node 进程。服务在跑但扩展没连上时，会明确告诉你是这个原因。
@@ -261,7 +261,7 @@ claude mcp add -s user browser -- agent-browser-bridge-mcp
 agent 连接时服务还会下发一段 `instructions`：先列标签页再动手、新页面开在后台、自己开的自己关、
 收尾清标记、不可逆动作先问。这套纪律跟着服务走，不依赖每个用户的提示词。
 
-MCP 不能省掉上面的安装步骤——Node、桥接服务、加载扩展一样都要。它省掉的是**对接**这一步：
+MCP 不能省掉上面的安装步骤，Node、桥接服务、加载扩展一样都要。它省掉的是**对接**这一步：
 没人需要再对着 `src/client.js` 写代码。
 
 ## 用法
@@ -368,8 +368,8 @@ await ab.wait({ match: 'example.com', idleMs: 2000 });
 
 ### HTTP 接口
 
-每个能力都是普通接口，任何语言或工具都能驱动。建议先读 `/health` —— 它返回 `apiVersion` 与
-`capabilities`，这是向前兼容的契约。
+每个能力都是普通接口，任何语言或工具都能驱动。建议先读 `/health`，它返回 `apiVersion` 与
+`capabilities`，版本升级时按它判断兼容性。
 
 ```
 GET  /health                      状态、apiVersion、能力清单、在线浏览器
@@ -403,11 +403,11 @@ flowchart TD
 | 是否需要标签页 | 需要 | 不需要 | 需要（且该页不能开着 DevTools） |
 | 落盘位置 | 你指定的路径 | 下载目录 + `videos/` | 下载目录 + `videos/` |
 
-`save` 与 `grab` 刻意共用同一个目录（`<浏览器下载目录>/videos/`），这样两条路的媒体 —— 以及
-把输出指到同一目录的外部下载器 —— 最终都汇合在一起。
+`save` 与 `grab` 刻意共用同一个目录（`<浏览器下载目录>/videos/`），这样两条路的媒体（以及
+把输出指到同一目录的外部下载器）最终都汇合在一起。
 
 **为什么必须有 `grab`。** `Referer` 在 XHR/fetch **和** `downloads` API 里都是禁用头，脚本加不上；
-`declarativeNetRequest` 能设置它，但**对扩展发起的下载不生效** —— 这三条都经过实测验证，且各自
+`declarativeNetRequest` 能设置它，但**对扩展发起的下载不生效**。这三条都经过实测验证，且各自
 以不同方式失败。结果就是：`save` 撞上有防盗链的 CDN 必然 403，`download` 撞上 CORS 必然
 `Failed to fetch`。`grab` 同时绕开两者：让**页面**去发请求（Referer 天然正确），同时用 CDP 往响应里
 注入 `Access-Control-Allow-Origin`，让页面有权读取。
@@ -416,7 +416,7 @@ flowchart TD
 # 绝对地址
 node src/cli.js save --url "https://cdn.example.com/clip.mp4" --filename "clip.mp4"
 
-# 相对地址 —— 按匹配到的标签页自身地址解析
+# 相对地址：按匹配到的标签页自身地址解析
 node src/cli.js save --match "example.com/gallery" --url "/media/photo-01.jpg"
 ```
 
@@ -432,7 +432,7 @@ node src/cli.js save --match "example.com/gallery" --url "/media/photo-01.jpg"
 - 从页面自身数据里挖出的 HLS/DASH 清单与直链
 - 内容图片（UI 图标按渲染尺寸过滤掉）
 
-`blob:` 源会被明确标出而不是隐藏 —— 那是内存句柄，必须先把背后的流找到才能下载。
+`blob:` 源会被明确标出而不是隐藏：那是内存句柄，必须先把背后的流找到才能下载。
 
 ```bash
 node src/cli.js media --match "example.com/watch"
@@ -446,12 +446,12 @@ node src/cli.js media --match "example.com/watch"
 
 agent 碰过的每个标签页都会被打标记，两种形式：
 
-- **图标上的圆点** —— 把站点图标重绘并叠一个彩色圆点，写回所有 `<link rel="icon">`。
+- **图标上的圆点**：把站点图标重绘并叠一个彩色圆点，写回所有 `<link rel="icon">`。
   颜色对应操作类型：读取、点击、输入、导航。
 - **标题前缀**。
 
 两者都会在几分钟后自动清除（页面自己排的清理定时器，所以即便是被冻结的后台标签页，你下次
-打开它时也会自动收拾干净），也可以随时手动清除 —— 扩展弹窗里，或 `read.js unmark`。
+打开它时也会自动收拾干净），也可以随时手动清除（扩展弹窗里，或 `read.js unmark`）。
 
 页面内部，`click` / `type` / `key` 还会驱动一个**虚拟光标**：箭头滑到目标元素上，在合成事件
 派发的位置按下，你可以直接看到 agent 在哪操作、下一步要点哪，而不是只信日志。光标驻留在最后
@@ -460,7 +460,7 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 两个曾让人查了很久的细节，写在这里以防你改到这块代码：
 
 - 换上 PNG data URL 时，图标 link 的 `type` **必须**一并改成 `image/png`。留着 `image/x-icon`
-  会让浏览器解码失败并静默回退到原图标 —— DOM 看着是对的，标签栏却什么都不显示。
+  会让浏览器解码失败并静默回退到原图标。DOM 看着是对的，标签栏却什么都不显示。
 - 会自己改写 `document.title` 的页面（仪表盘、SPA）会把标题标记冲掉，只剩半截标记。因此清理
   逻辑同时按标题前缀**和**标签页的 `favIconUrl` 来发现标记，而不是只看标题。
 
@@ -486,7 +486,7 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 - 只绑定 `127.0.0.1`，不对局域网或外网暴露。
 - 校验 `Origin` 请求头，带非本机 Origin 的请求一律拒绝，网页无法用 `fetch` 或表单提交驱动扩展。
   边界到这里为止：完全不带 `Origin` 头的请求（`<img>`、`<script>`、预取）会被放行，因为本机脚本
-  ——以及扩展自己——就是这样访问的。这类请求既读不到响应、也提交不了任务结果，但能触发一次
+  （以及扩展自己）就是这样访问的。这类请求既读不到响应、也提交不了任务结果，但能触发一次
   `/tabs` 派发，也能占住轮询槽位，代价是下一个任务投递不出去。
 - 站点访问**默认拒绝**，由浏览器权限系统强制。安装清单除本机桥接地址外不索取任何主机权限。
 - 服务端拒绝不在允许列表里的扩展 ID，因此一个**没有**申请访问桥接地址的扩展只会拿到 403，
@@ -514,7 +514,7 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 
 两个入口都不需要任何配置。
 
-**离线**：不用浏览器、不用测试页，也不会干扰你正在跑的那个桥接实例——每个套件各自在临时端口上
+**离线**：不用浏览器、不用测试页，也不会干扰你正在跑的那个桥接实例，每个套件各自在临时端口上
 起自己的服务，或者在替身 DOM 上驱动扩展的注入函数。
 
 ```bash
@@ -524,34 +524,34 @@ node test/test-offline.js        # 跑下面全部套件，最后给汇总
 | 套件 | 钉住的是什么 |
 |---|---|
 | `test-server.js` | 派发、任务队列（含"已过期的任务不会被事后执行"）、结果体上限、来源校验 |
-| `test-eval.js` | `eval` 的代码只执行一次——验证对象是从 `evalInPage` 里抽出来的真实源码 |
+| `test-eval.js` | `eval` 的代码只执行一次：验证对象是从 `evalInPage` 里抽出来的真实源码 |
 | `test-frame-targeting.js` | click/type/key 只在一个框架里执行，不是每个命中的框架都执行一次 |
 | `test-client.js` | 重复的命令行参数会累加；超时不会被报成"服务未启动" |
 | `test-allowlist.js` | 哪些来源能驱动桥接，以及清单公钥推导出的 ID 与服务端常量一致 |
-| `test-sw-load.js` | 服务脚本的模块图能不能加载、启动是不是只发生一次、导出有没有少——在浏览器里加载失败只表现为"扩展没反应" |
-| `test-result-semantics.js` | 动作没做成时必须报失败，而不是报成功——这是让调用方"再也不用看第二眼"的那类缺陷 |
+| `test-sw-load.js` | 服务脚本的模块图能不能加载、启动是不是只发生一次、导出有没有少：在浏览器里加载失败只表现为"扩展没反应" |
+| `test-result-semantics.js` | 动作没做成时必须报失败，而不是报成功：这是让调用方"再也不用看第二眼"的那类缺陷 |
 | `check-inject-scope.js` | 注入函数只带自身源码：引用模块级辅助函数能编译、却在运行时报错 |
-| `check-extension-id.js` | 上面那条 ID 一致性单独跑一遍——这里对不上不会有任何可见症状 |
+| `check-extension-id.js` | 上面那条 ID 一致性单独跑一遍：这里对不上不会有任何可见症状 |
 | `check-version.js` | `package.json` 与清单里的版本号一致，免得 `diag` 报的版本和 registry 上的对不上 |
 | `check-package.js` | 发布包里不能有未纳入版本控制的文件；`npm pack` 会强制带上 `README*`，本机运维文档差点就这样被传上去 |
 | `test-mcp.js` | MCP 协议本身，自己充当客户端对话，而不是引入 SDK |
-| `test-i18n-keys.js` | 弹窗 i18n key 与 locale 文件一致——缺 key 时 `getMessage` 返回空字符串，表现为一片空白 |
+| `test-i18n-keys.js` | 弹窗 i18n key 与 locale 文件一致：缺 key 时 `getMessage` 返回空字符串，表现为一片空白 |
 | `test-wait.js` | 每种等待条件（selector、text、url、count、idle）成立时返回 ok，不成立时返回 wait_timeout |
-| `test-audit.js` | 审计日志记录动作但不泄露页面内容——泄露"谁读了什么"的日志比没有日志更糟 |
-| `test-token.js` | 共享 token 的生成、校验、拒绝——没有 token 时任何本机程序都能驱动桥接 |
-| `test-update.js` | 版本比较逻辑——用户看到错误的更新提示，或该提示时没提示 |
-| `test-markdown.js` | HTML 转 Markdown——结构丢失或页面内容原样塞进 Markdown |
-| `test-frozen-tab.js` | 冻结标签页的报错指明下一步——用户不知道该先 activate 再重试 |
-| `test-batch.js` | 批量动作的执行顺序与停止条件——批量绕过风险护栏或步骤乱序 |
-| `test-lease.js` | Per-tab lease 的获取与释放——两个 agent 在同一标签页上交错执行 |
+| `test-audit.js` | 审计日志记录动作但不泄露页面内容：泄露"谁读了什么"的日志比没有日志更糟 |
+| `test-token.js` | 共享 token 的生成、校验、拒绝：没有 token 时任何本机程序都能驱动桥接 |
+| `test-update.js` | 版本比较逻辑：用户看到错误的更新提示，或该提示时没提示 |
+| `test-markdown.js` | HTML 转 Markdown：结构丢失或页面内容原样塞进 Markdown |
+| `test-frozen-tab.js` | 冻结标签页的报错指明下一步：用户不知道该先 activate 再重试 |
+| `test-batch.js` | 批量动作的执行顺序与停止条件：批量绕过风险护栏或步骤乱序 |
+| `test-lease.js` | Per-tab lease 的获取与释放：两个 agent 在同一标签页上交错执行 |
 
 `test-mcp.js` 在设了 `ABB_MCP_OFFLINE=1` 时会跳过需要扩展的那一节，CI 用的就是这个。同一套件在
-Linux（Node 18/20/22）和 Windows（Node 18/22）上各跑一遍——Windows 才是这工具的主场平台，
+Linux（Node 18/20/22）和 Windows（Node 18/22）上各跑一遍，Windows 才是这工具的主场平台，
 不能只靠一个 Ubuntu 任务来证明它能用。
 
 `test/` 与 `tools/` 只存在于克隆下来的仓库里，不随 npm 包发布。
 
-**真机**：需要真浏览器，但仍然零配置。它拿桥接自己的地址当测试页——该地址在清单的必需
+**真机**：需要真浏览器，但仍然零配置。它拿桥接自己的地址当测试页，该地址在清单的必需
 host_permissions 里，天然已授权，所以没有站点要授权：
 
 ```bash
@@ -567,7 +567,7 @@ node test/test-cli.js            # 22 项，一个子命令一项
 ```
 
 同一思路再上一层：开一个后台标签页，把命令行每个子命令都对着它跑一遍，确认各自仍打印该打印的
-内容。`click --dryRun` 的 bug 就是这样翻出来的——它读了一个试运行根本不会返回的字段，于是**只有
+内容。`click --dryRun` 的 bug 就是这样翻出来的：它读了一个试运行根本不会返回的字段，于是**只有
 人类可读的输出版本坏了**，而 `--json` 看起来完全正常。
 
 **需要配置的**：这些要一个你自己控制的页面：
@@ -592,7 +592,7 @@ src/                     Node 这一侧
   server.js              本地桥接服务（零依赖、无构建步骤）
   client.js              客户端库（package.json 的 main），想自己写代码调桥接时用
   cli.js                 同样的能力，命令行形态
-  mcp.js                 MCP 服务——agent 直接对接的就是它
+  mcp.js                 MCP 服务：agent 直接对接的就是它
   setup.js               一条命令自检：缺哪一层、下一步做什么
 extension/               MV3 扩展（Chrome + Edge 通用）
   manifest.json          权限、入口、公钥
@@ -605,7 +605,7 @@ extension/               MV3 扩展（Chrome + Edge 通用）
     marks.js             页面上可见的「被 agent 动过」标记
     guards.js            注入超时、框架选择、权限检查
     config.js            桥接地址、轮询参数、浏览器标识
-test/                    测试——哪些需要浏览器见上面的「测试」一节
+test/                    测试，哪些需要浏览器见上面的「测试」一节
   config.js              测试页配置的加载器（test-config.js 是你自己的，已被忽略）
 tools/                   离线检查：注入函数自包含、扩展 ID 一致
 scripts/                 Windows 辅助脚本：登录时启动桥接、启动/重启桥接
@@ -616,7 +616,7 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 `src/cli.js` 与 `src/mcp.js` 同时声明为 npm 的 `bin`，所以装完之后直接用
 `agent-browser-bridge` / `agent-browser-bridge-mcp` 调用，不必写路径。
 
-两件值得贡献者知道的事：
+改代码前要知道的两件事：
 
 - 扩展的 service worker 是唯一碰页面的部分，其中 `sw/injected.js` 特殊：那些函数会被**序列化**送进页面，所以每个都必须自包含。`tools/check-inject-scope.js` 守这条，原因见 `docs/ARCHITECTURE.md`。
 - 桥接的全部 HTTP 路由集中在 `src/server.js` 末尾的路由表里，一个路由一个小函数；加接口就是加一行。
@@ -625,7 +625,7 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 
 - 浏览器必须在运行，且扩展处于启用状态。
 - 页面必须至少加载过一次；从未渲染的内容读不到。
-- `key` 派发的是合成事件 —— 能触发页面内处理器，但不产生文本，也无法触发浏览器级快捷键。
+- `key` 派发的是合成事件：能触发页面内处理器，但不产生文本，也无法触发浏览器级快捷键。
   输入文字请用 `type`。
 - 只在标签页可见时才渲染的编辑界面，需要先把该标签页切到前台一次。
 - **源地址是 `blob:` 的流无法直接保存。** 那是内存句柄而非可请求的地址。如果页面是用某个清单
@@ -639,7 +639,7 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 
 ## 参与开发
 
-欢迎提 issue、翻译和拉取请求 —— 怎么跑测试、这个仓库要求自己守哪些规矩、以及重载扩展前必须
+欢迎提 issue、翻译和拉取请求。怎么跑测试、这个仓库要求自己守哪些规矩、以及重载扩展前必须
 知道的那个死锁，都写在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。改动记录见
 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -647,4 +647,4 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 
 ## 许可
 
-MIT —— 见 [LICENSE](LICENSE)。
+MIT，见 [LICENSE](LICENSE)。
