@@ -156,6 +156,47 @@ export function clickInPage(opts) {
   const allowNonLink = !!opts.allowNonLink;
   const isMainFrame = (function () { try { return window === window.top; } catch (e) { return false; } })();
 
+  // 页面侧虚拟鼠标：agent 操作时在页面上可见地移动和按下。
+  // 必须定义在注入函数内部（页面里不存在模块作用域），靠固定 ID 幂等复用元素。
+  // 纯可视化：任何失败都不能影响动作本身，全部吞掉异常。
+  const cursor = (function () {
+    const ensureCursor = () => {
+      let el = document.getElementById('__abb_virtual_cursor__');
+      if (el && el.dataset.abbCursorVer !== '2') { el.remove(); el = null; } /* 扩展更新后旧元素按版本号重建 */
+      if (!el) {
+        el = document.createElement('div');
+        el.id = '__abb_virtual_cursor__';
+        el.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;'
+          + 'width:32px;height:32px;transition:left .18s ease-out,top .18s ease-out,transform .08s ease-in;'
+          + 'filter:drop-shadow(1px 2px 2px rgba(0,0,0,.35));';
+        el.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32"><path d="M5 3l14 9-6.5 1.5L9 20z" '
+          + 'fill="#fff" stroke="#f85149" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+        document.documentElement.appendChild(el);
+        el.dataset.abbCursorVer = '2';
+      }
+      return el;
+    };
+    const guard = (fn) => { try { fn(); } catch (e) { /* 可视化失败不影响动作 */ } };
+    return {
+      move(x, y) {
+        guard(() => {
+          const el = ensureCursor();
+          el.style.left = (x - 6) + 'px';
+          el.style.top = (y - 3) + 'px';
+        });
+      },
+      press() {
+        guard(() => {
+          const el = ensureCursor();
+          el.style.transform = 'scale(.82)';
+          setTimeout(() => {
+            if (el.isConnected) { el.style.transform = 'scale(1)'; }
+          }, 90);
+        });
+      }
+    };
+  })();
+
   const visible = (el) => {
     if (!el || !el.getBoundingClientRect) { return false; }
     const r = el.getBoundingClientRect();
@@ -292,6 +333,11 @@ export function clickInPage(opts) {
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
 
+    // 虚拟光标：让用户看到 agent 的"鼠标"移动到目标并按下。
+    // cursor 至少包含一个动作类型，因此探测路径（probe/dryRun）不会走到这里。
+    cursor.move(cx, cy);
+    cursor.press();
+
     const common = {
       bubbles: true,
       cancelable: true,
@@ -382,6 +428,48 @@ export function linksInPage(selector, filterText) {
 
 export function typeInPage(opts) {
   const isMainFrame = (function () { try { return window === window.top; } catch (e) { return false; } })();
+
+  // 页面侧虚拟鼠标：agent 操作时在页面上可见地移动和按下。
+  // 必须定义在注入函数内部（页面里不存在模块作用域），靠固定 ID 幂等复用元素。
+  // 纯可视化：任何失败都不能影响动作本身，全部吞掉异常。与点击动作同款实现。
+  const cursor = (function () {
+    const ensureCursor = () => {
+      let el = document.getElementById('__abb_virtual_cursor__');
+      if (el && el.dataset.abbCursorVer !== '2') { el.remove(); el = null; } /* 扩展更新后旧元素按版本号重建 */
+      if (!el) {
+        el = document.createElement('div');
+        el.id = '__abb_virtual_cursor__';
+        el.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;'
+          + 'width:32px;height:32px;transition:left .18s ease-out,top .18s ease-out,transform .08s ease-in;'
+          + 'filter:drop-shadow(1px 2px 2px rgba(0,0,0,.35));';
+        el.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32"><path d="M5 3l14 9-6.5 1.5L9 20z" '
+          + 'fill="#fff" stroke="#f85149" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+        document.documentElement.appendChild(el);
+        el.dataset.abbCursorVer = '2';
+      }
+      return el;
+    };
+    const guard = (fn) => { try { fn(); } catch (e) { /* 可视化失败不影响动作 */ } };
+    return {
+      move(x, y) {
+        guard(() => {
+          const el = ensureCursor();
+          el.style.left = (x - 6) + 'px';
+          el.style.top = (y - 3) + 'px';
+        });
+      },
+      press() {
+        guard(() => {
+          const el = ensureCursor();
+          el.style.transform = 'scale(.82)';
+          setTimeout(() => {
+            if (el.isConnected) { el.style.transform = 'scale(1)'; }
+          }, 90);
+        });
+      }
+    };
+  })();
+
   /* 以下两个辅助函数必须定义在本函数内部：注入到页面的函数只携带自身源码，
      模块作用域的函数在页面里并不存在，若在外层定义会直接抛 ReferenceError。 */
 
@@ -513,6 +601,13 @@ export function typeInPage(opts) {
 
   // preventScroll 避免聚焦时把用户的视图滚走
   try {
+    const tro = target.getBoundingClientRect();
+    if (tro && (tro.width || tro.height)) {
+      cursor.move(tro.left + tro.width / 2, tro.top + tro.height / 2);
+      cursor.press();
+    }
+  } catch (e) { /* 虚拟光标失败不影响动作 */ }
+  try {
     target.focus({ preventScroll: true });
   } catch (e) {
     target.focus();
@@ -607,6 +702,47 @@ export function keyInPage(opts) {
 
   const isMainFrame = (function () { try { return window === window.top; } catch (e) { return false; } })();
 
+  // 页面侧虚拟鼠标：agent 操作时在页面上可见地移动和按下。
+  // 必须定义在注入函数内部（页面里不存在模块作用域），靠固定 ID 幂等复用元素。
+  // 纯可视化：任何失败都不能影响动作本身，全部吞掉异常。与点击动作同款实现。
+  const cursor = (function () {
+    const ensureCursor = () => {
+      let el = document.getElementById('__abb_virtual_cursor__');
+      if (el && el.dataset.abbCursorVer !== '2') { el.remove(); el = null; } /* 扩展更新后旧元素按版本号重建 */
+      if (!el) {
+        el = document.createElement('div');
+        el.id = '__abb_virtual_cursor__';
+        el.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;'
+          + 'width:32px;height:32px;transition:left .18s ease-out,top .18s ease-out,transform .08s ease-in;'
+          + 'filter:drop-shadow(1px 2px 2px rgba(0,0,0,.35));';
+        el.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32"><path d="M5 3l14 9-6.5 1.5L9 20z" '
+          + 'fill="#fff" stroke="#f85149" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+        document.documentElement.appendChild(el);
+        el.dataset.abbCursorVer = '2';
+      }
+      return el;
+    };
+    const guard = (fn) => { try { fn(); } catch (e) { /* 可视化失败不影响动作 */ } };
+    return {
+      move(x, y) {
+        guard(() => {
+          const el = ensureCursor();
+          el.style.left = (x - 6) + 'px';
+          el.style.top = (y - 3) + 'px';
+        });
+      },
+      press() {
+        guard(() => {
+          const el = ensureCursor();
+          el.style.transform = 'scale(.82)';
+          setTimeout(() => {
+            if (el.isConnected) { el.style.transform = 'scale(1)'; }
+          }, 90);
+        });
+      }
+    };
+  })();
+
   let target = opts.selector ? document.querySelector(opts.selector) : null;
   if (!target) { target = document.activeElement; }
   if (!target || target === document.body) {
@@ -638,6 +774,14 @@ export function keyInPage(opts) {
     altKey: !!opts.alt,
     metaKey: !!opts.meta
   };
+
+  try {
+    const kro = target.getBoundingClientRect();
+    if (kro && (kro.width || kro.height)) {
+      cursor.move(kro.left + kro.width / 2, kro.top + kro.height / 2);
+      cursor.press();
+    }
+  } catch (e) { /* 虚拟光标失败不影响动作 */ }
 
   try {
     target.focus({ preventScroll: true });

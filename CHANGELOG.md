@@ -34,6 +34,7 @@ reconstructing them from the code alone would be guesswork.
 - `test/test-wait.js`: each wait condition returns ok when satisfied and `wait_timeout` when not — the failure mode that means the next step ran before the page was ready.
 - Audit log: every dispatched action appends one JSONL line (timestamp, action, target, outcome, duration, caller) to `audit.jsonl` in the per-user config directory. Query routes (`tabs`, `frames`, `media`, `diag`) are excluded. The file rotates at 10 MB. `node src/cli.js log [--tail N] [--json]` reads it. No page content is ever written.
 - `test/test-audit.js`: the audit log records actions but never page content — a log that leaks what someone read is worse than no log.
+- Virtual cursor: `click` / `type` / `key` render a visible arrow cursor at the target element (glides between consecutive actions, presses when the synthetic events fire), so the person watching the browser can see where the agent is acting. Probe and dry-run stay side-effect free; cursor failures never affect the action itself.
 
 ### Changed
 

@@ -457,6 +457,11 @@ Both clear themselves after a few minutes (the page schedules its own cleanup, s
 background tab tidies up when you next visit it), and both can be cleared on demand — from the
 extension popup, or with `read.js unmark`.
 
+Inside the page itself, `click` / `type` / `key` also drive a **virtual cursor**: an arrow that
+glides to the target element and presses exactly where the synthetic events fire, so you can watch
+what the agent is doing (and where it's about to act) instead of trusting the log. It stays at the
+last position until the next action or navigation; probe and dry-run never draw it.
+
 Two details that cost real debugging time, in case you touch this code:
 
 - The favicon link's `type` **must** be updated to `image/png` when swapping in a PNG data URL.
