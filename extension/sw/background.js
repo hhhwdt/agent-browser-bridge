@@ -10,8 +10,8 @@
 
 'use strict';
 
-import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS } from './config.js';
-import { MARKS_KEY, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
+import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
+import { MARKS_KEY, collectMarkedTabs, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
 
 let loopRunning = false;
@@ -52,6 +52,9 @@ async function diagAction() {
     allSitesGranted = grantedOrigins.some((o) => o === '*://*/*' || o === 'http://*/*' || o === 'https://*/*');
   } catch (e) { /* 权限查询失败时留空，不阻断诊断 */ }
 
+  // 实时检测哪些标签页真的有标记（标题前缀或徽标），而不是依赖 storage 里的历史记录
+  const actuallyMarked = await collectMarkedTabs();
+
   return {
     ok: true,
     data: {
@@ -63,7 +66,8 @@ async function diagAction() {
       loopRunning,
       // service worker 启动次数与时间，用于判断是否被频繁回收
       boot,
-      markedTabs: marks,
+      markedTabs: actuallyMarked,
+      markedCount: actuallyMarked.length,
       keepaliveAlarm: alarm ? { periodInMinutes: alarm.periodInMinutes, scheduledTime: alarm.scheduledTime } : null,
       grantedOrigins,
       allSitesGranted,
@@ -238,13 +242,29 @@ async function handleTask(task) {
  * 长轮询主循环
  * ------------------------------------------------------------------ */
 
+/** 从 chrome.storage.local 读取 token，构造请求头。 */
+async function tokenHeaders() {
+  try {
+    const stored = await chrome.storage.local.get('abb-token');
+    const token = stored && stored['abb-token'];
+    if (token) { return { [TOKEN_HEADER]: token }; }
+  } catch (e) { /* 忽略 */ }
+  return {};
+}
+
 async function pollOnce() {
   const res = await fetch(`${BRIDGE_URL}/poll?browser=${encodeURIComponent(BROWSER_NAME)}`, {
     method: 'GET',
     cache: 'no-store',
+    headers: await tokenHeaders(),
     signal: AbortSignal.timeout(POLL_TIMEOUT_MS + 5000)
   });
 
+  if (res.status === 401) {
+    // token 无效或缺失：不重试，等用户在弹窗里更新
+    console.warn('[abb] token 被拒绝（401），请在扩展弹窗里更新 token');
+    return { authFailed: true };
+  }
   if (res.status === 204) {
     return; // 正常超时，没有任务
   }
@@ -282,9 +302,10 @@ async function postResult(taskId, result) {
   }
 
   try {
+    const headers = { 'Content-Type': 'application/json', ...(await tokenHeaders()) };
     const res = await fetch(`${BRIDGE_URL}/result?browser=${encodeURIComponent(BROWSER_NAME)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ id: taskId, result }),
       signal: AbortSignal.timeout(10000)
     });
@@ -312,7 +333,12 @@ async function pollLoop() {
     // 都返回 extension_not_connected（实测踩到，冷启动时尤其明显）。
     for (;;) {
       try {
-        await pollOnce();
+        const result = await pollOnce();
+        if (result && result.authFailed) {
+          // token 被拒绝：不重试，等用户在弹窗里更新
+          console.warn('[abb] 轮询停止：token 被拒绝（401）');
+          break;
+        }
       } catch (e) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       }

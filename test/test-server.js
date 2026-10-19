@@ -93,7 +93,7 @@ function withOrigin(origin, method, httpPath) {
 }
 
 (async () => {
-  const srv = spawn(process.execPath, [SERVER, '--port', String(PORT)], { stdio: 'ignore' });
+  const srv = spawn(process.execPath, [SERVER, '--port', String(PORT), '--no-token'], { stdio: 'ignore' });
   await sleep(900);
 
   try {

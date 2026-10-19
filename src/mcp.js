@@ -160,7 +160,10 @@ const TOOLS = [
       properties: Object.assign({}, PAGE_TARGET, {
         selector: { type: 'string', description: '只读这个 CSS 选择器命中的元素，省略则自动挑正文容器。' },
         includeLinks: { type: 'boolean', description: '同时返回正文里的链接列表。' },
-        returnHtml: { type: 'boolean', description: '额外返回 outerHTML 与可编辑区域清单，用于定位选择器。' }
+        returnHtml: { type: 'boolean', description: '额外返回 outerHTML 与可编辑区域清单，用于定位选择器。' },
+        format: { type: 'string', enum: ['text', 'markdown'], description: '默认 text；markdown 返回 Markdown 格式正文。' },
+        autoActivate: { type: 'boolean', description: '遇到冻结标签页时先 activate 唤醒再重试一次。' },
+        lease: { type: 'boolean', description: '获取标签页独占锁，防止其他 caller 同时操作同一标签页。' }
       }),
       additionalProperties: false
     }
@@ -191,6 +194,25 @@ const TOOLS = [
         waitMs: { type: 'number', description: '等待地址真正变更的最长时间，默认 10000。' }
       }),
       required: ['url'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'browser_batch',
+    description: '批量执行多个动作，按顺序执行，每步独立返回结果。'
+      + '第一步失败时停止（除非 continueOnError=true）。'
+      + '每个步骤保持自己的语义：破坏性 click 仍需 force，type 仍不提交。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          description: '动作对象数组，每个对象至少包含 action 字段。',
+          items: { type: 'object' }
+        },
+        continueOnError: { type: 'boolean', description: '第一步失败后是否继续执行后续步骤。' }
+      },
+      required: ['steps'],
       additionalProperties: false
     }
   },
@@ -252,13 +274,17 @@ const TOOLS = [
   },
   {
     name: 'browser_wait_for',
-    description: '等某个元素出现或消失、或等某段文字出现。页面异步刷新（对话框、列表、编辑器加载）之后'
-      + '必须用它，否则下一步会随机失败。state=disappear 用于等加载动画消失。',
+    description: '等某个元素出现或消失、等某段文字出现、等 URL 包含某子串、等元素数量达标、或等网络空闲。'
+      + '页面异步刷新（对话框、列表、编辑器加载）之后必须用它，否则下一步会随机失败。'
+      + 'state=disappear 用于等加载动画消失。',
     inputSchema: {
       type: 'object',
       properties: Object.assign({}, PAGE_TARGET, {
         selector: { type: 'string', description: '等待这个选择器命中的元素出现/消失。' },
         text: { type: 'string', description: '等待正文里出现这段文字。' },
+        url: { type: 'string', description: '等待 location.href 包含这个子串（SPA 路由变化）。' },
+        count: { type: 'number', description: '等待 selector 命中的元素数量达到 n（需同时提供 selector）。' },
+        idleMs: { type: 'number', description: '等待网络空闲：资源请求数在 N 毫秒内不再增长。' },
         state: { type: 'string', enum: ['appear', 'disappear'], description: '默认 appear。' },
         timeoutMs: { type: 'number', description: '超时毫秒数，默认 10000。' }
       }),
@@ -427,7 +453,10 @@ const HANDLERS = {
       ...pageTarget(a),
       selector: a.selector,
       includeLinks: !!a.includeLinks,
-      returnHtml: !!a.returnHtml
+      returnHtml: !!a.returnHtml,
+      format: a.format,
+      autoActivate: !!a.autoActivate,
+      lease: !!a.lease
     });
     const head = `标题: ${d.title}\nURL: ${d.url}\n标签页: ${d.tabId}${d.wasActive ? '（激活）' : '（后台）'}`
       + `  框架: ${d.frameId}  正文容器: ${d.usedSelector}  字符数: ${d.charCount}`;
@@ -472,6 +501,18 @@ const HANDLERS = {
       + `${d.openedNewTab ? '（后台新建）' : d.wasActive ? '（当前激活）' : '（后台）'}`
       + `${d.redirected ? '\n（发生了重定向，上面是最终地址）' : ''}`
       + `${d.waitTimedOut ? '\n（等待地址变更超时，页面可能仍在加载）' : ''}`);
+  },
+
+  async browser_batch(a) {
+    if (!Array.isArray(a.steps) || a.steps.length === 0) {
+      return errorText('需要 steps 数组。');
+    }
+    const d = await ab.batch(a.steps, { continueOnError: a.continueOnError });
+    const lines = (d.results || []).map((r) => {
+      const mark = r.ok ? 'ok  ' : 'FAIL';
+      return `  ${mark}  步骤 ${r.step}  ${r.action}  ${r.ok ? '' : r.error || ''}`;
+    });
+    return text(`批量执行完成（${(d.results || []).length} 步）:\n` + lines.join('\n'));
   },
 
   async browser_click(a) {
@@ -530,13 +571,16 @@ const HANDLERS = {
   },
 
   async browser_wait_for(a) {
-    if (!a.selector && !a.text) {
-      return errorText('需要 selector 或 text 之一作为等待条件。');
+    if (!a.selector && !a.text && !a.url && !a.idleMs) {
+      return errorText('需要 selector、text、url 或 idleMs 之一作为等待条件。');
     }
     const d = await ab.wait({
       ...pageTarget(a),
       selector: a.selector,
       text: a.text,
+      url: a.url,
+      count: a.count,
+      idleMs: a.idleMs,
       state: a.state === 'disappear' ? 'disappear' : 'appear',
       timeoutMs: a.timeoutMs
     });

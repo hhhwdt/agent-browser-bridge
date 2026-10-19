@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <style>
@@ -41,68 +41,71 @@
   </style>
 </head>
 <body>
-  <h3>Agent Browser Bridge</h3>
+  <h3 data-i18n="appName"></h3>
 
   <div class="row">
     <span class="dot" id="bridgeDot"></span>
-    <span id="bridgeStatus">正在检测桥接服务…</span>
+    <span id="bridgeStatus" data-i18n="statusChecking"></span>
   </div>
 
   <hr />
 
-  <div class="muted">被操作的标签页：</div>
+  <div class="muted" data-i18n="marksHeading"></div>
   <div class="row">
-    <span id="markSummary">读取中…</span>
-    <button id="clearMarksBtn">清除所有标记</button>
+    <span id="markSummary" data-i18n="loading"></span>
+    <button id="clearMarksBtn" data-i18n="clearMarks"></button>
   </div>
-  <div class="muted" id="markHint">
-    标记会在标签标题前加 🤖 并在图标上加点，用于提示这些页面正被 agent 操作。
-  </div>
+  <div class="muted" id="markHint" data-i18n="marksHint"></div>
 
   <hr />
 
-  <div class="muted">已授权可读取的站点：</div>
-  <ul id="originList"><li>读取中…</li></ul>
+  <div class="muted" data-i18n="originsHeading"></div>
+  <ul id="originList"></ul>
 
   <div class="row">
-    <input type="text" id="originInput" placeholder="例如 confluence.example.com" />
-    <button id="grantBtn" class="primary">授权</button>
+    <input type="text" id="originInput" />
+    <button id="grantBtn" class="primary" data-i18n="grant"></button>
   </div>
 
   <div class="row">
-    <button id="grantAllBtn">授权所有站点</button>
-    <button id="revokeAllBtn">撤销全部</button>
+    <button id="grantAllBtn" data-i18n="grantAll"></button>
+    <button id="revokeAllBtn" data-i18n="revokeAll"></button>
   </div>
 
   <hr />
 
-  <div class="muted">可选权限（默认关闭，需单独授予）：</div>
-  <ul id="advList"><li>读取中…</li></ul>
+  <div class="muted" data-i18n="advHeading"></div>
+  <ul id="advList"></ul>
   <div class="row">
-    <button id="grantAdvBtn" class="primary">授予</button>
-    <button id="revokeAdvBtn">撤销</button>
+    <button id="grantAdvBtn" class="primary" data-i18n="grantAdv"></button>
+    <button id="revokeAdvBtn" data-i18n="revokeAdv"></button>
   </div>
   <div class="muted">
-    授予后解锁 <b>session</b>（读取登录 Cookie 与站点存储）。未授予时该动作返回明确提示，其余功能不受影响。
-  </div>
-
-  <hr />
-  <div class="muted">
-    <b>debugger</b> 是必需权限（Chrome 不允许它作为可选权限），
-    用于 <b>upload</b>（向文件选择框填入本地文件）和 <b>screenshot</b> 的元素/整页/后台标签截图。
-    附加调试器时浏览器顶部会显示提示条，属正常现象。
+    <span data-i18n="advHintPre"></span><b>session</b><span data-i18n="advHintPost"></span>
   </div>
 
   <hr />
-  <div class="muted">
-    只连接本机 127.0.0.1，不访问外部网络。可读页面内容并在授权范围内点击、输入。
+
+  <div class="muted" data-i18n="tokenHeading"></div>
+  <div class="row">
+    <input type="text" id="tokenInput" data-i18n-placeholder="tokenPlaceholder" />
+    <button id="tokenSaveBtn" data-i18n="tokenSave"></button>
   </div>
+  <div class="muted" id="tokenHint" data-i18n="tokenHint"></div>
 
   <hr />
+
+  <div class="muted" data-i18n="debuggerNote"></div>
+
+  <hr />
+
+  <div class="muted" data-i18n="localNote"></div>
+
+  <hr />
+
   <div class="muted">
-    扩展 ID：<span id="extId">读取中…</span><br />
-    桥接服务只放行允许列表内的扩展 ID。若服务端日志提示拒绝本扩展，用
-    <code>--allow-extension &lt;上面的 ID&gt;</code> 启动服务。
+    <span data-i18n="extIdLabel"></span> <span id="extId" data-i18n="loading"></span><br />
+    <span data-i18n-html="extIdNote"></span>
   </div>
 
   <script src="popup.js"></script>

@@ -110,11 +110,11 @@ const EXPECTED = {
   'injected.js': [
     'extractInPage', 'clickInPage', 'linksInPage', 'typeInPage', 'keyInPage', 'indicatorInPage',
     'diagInPage', 'waitInPage', 'tabMarkInPage', 'mediaInPage', 'readStorageInPage', 'evalInPage',
-    'rectInPage', 'fetchInPage'
+    'rectInPage', 'fetchInPage', 'markdownInPage'
   ],
   'guards.js': ['withTimeout', 'tabUnresponsive', 'injectAndPick', 'injectInBestFrame', 'resolveTab', 'ensureInjectable'],
-  // collectMarkedTabs / applyBadge 只在本模块内部用，刻意不导出
-  'marks.js': ['loadMarks', 'saveMarks', 'removeBadge', 'markTab', 'markTask', 'unmarkTask'],
+  // applyBadge 只在本模块内部用，刻意不导出
+  'marks.js': ['loadMarks', 'saveMarks', 'removeBadge', 'markTab', 'markTask', 'unmarkTask', 'collectMarkedTabs'],
   'actions.js': [
     'listTabs', 'readTab', 'linksTab', 'clickTab', 'typeTab', 'keyTab', 'navigateTab', 'waitTab',
     'screenshotTab', 'evalTab', 'sessionTab', 'uploadTab', 'downloadTab', 'saveTab', 'grabTab',

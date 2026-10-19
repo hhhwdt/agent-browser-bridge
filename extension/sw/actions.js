@@ -7,7 +7,7 @@
 
 'use strict';
 
-import { clickInPage, diagInPage, evalInPage, extractInPage, fetchInPage, keyInPage, linksInPage, mediaInPage, readStorageInPage, rectInPage, typeInPage, waitInPage } from './injected.js';
+import { clickInPage, diagInPage, evalInPage, extractInPage, fetchInPage, keyInPage, linksInPage, markdownInPage, mediaInPage, readStorageInPage, rectInPage, typeInPage, waitInPage } from './injected.js';
 import { BROWSER_NAME } from './config.js';
 import { INJECT_TIMEOUT_MS, ensureInjectable, injectAndPick, injectInBestFrame, resolveTab, tabUnresponsive, withTimeout } from './guards.js';
 
@@ -56,8 +56,8 @@ export async function waitTab(task) {
   const guard = await ensureInjectable(tab);
   if (guard.error) { return guard.error; }
 
-  if (!task.selector && !task.text) {
-    return { ok: false, error: 'missing_condition', hint: '需要提供 selector 或 text 作为等待条件' };
+  if (!task.selector && !task.text && !task.url && !task.idleMs) {
+    return { ok: false, error: 'missing_condition', hint: '需要提供 selector、text、url 或 idleMs 作为等待条件' };
   }
 
   const timeoutMs = typeof task.timeoutMs === 'number' ? task.timeoutMs : 10000;
@@ -68,6 +68,9 @@ export async function waitTab(task) {
     [{
       selector: task.selector || null,
       text: task.text || null,
+      url: task.url || null,
+      count: typeof task.count === 'number' ? task.count : null,
+      idleMs: typeof task.idleMs === 'number' ? task.idleMs : null,
       state: task.state === 'disappear' ? 'disappear' : 'appear',
       timeoutMs,
       pollMs: typeof task.pollMs === 'number' ? task.pollMs : 200
@@ -245,6 +248,42 @@ export async function readTab(task) {
   const tab = await resolveTab(task);
   const guard = await ensureInjectable(tab);
   if (guard.error) { return guard.error; }
+
+  const format = task.format === 'markdown' ? 'markdown' : 'text';
+
+  if (format === 'markdown') {
+    // markdown 模式：先提取元素，再转 markdown
+    const picked = await injectAndPick(
+      tab.id,
+      extractInPage,
+      [task.selector || null, false, false],
+      pickContentFrame(task.selector),
+      typeof task.frameId === 'number' ? task.frameId : undefined
+    );
+    if (picked.error) { return { ...picked.error, url: tab.url }; }
+    const el = picked.data && picked.data.el;
+    if (!el) { return { ok: false, error: 'element_not_found', url: tab.url }; }
+    const md = await injectAndPick(
+      tab.id,
+      markdownInPage,
+      [el],
+      pickContentFrame(task.selector),
+      typeof task.frameId === 'number' ? task.frameId : undefined
+    );
+    if (md.error) { return { ...md.error, url: tab.url }; }
+    return {
+      ok: true,
+      data: {
+        tabId: tab.id,
+        wasActive: !!tab.active,
+        frameId: picked.frameId,
+        frameCount: picked.frameCount,
+        format: 'markdown',
+        markdown: md.data.markdown,
+        charCount: md.data.charCount
+      }
+    };
+  }
 
   const picked = await injectAndPick(
     tab.id,

@@ -8,8 +8,8 @@ Read this before you install or call Agent Browser Bridge. It is a condition of 
 
 ## 1. What it actually does
 
-Once installed, **any program on this machine that can reach `127.0.0.1:18777`** can make your
-browser:
+Once installed, **any program on this machine that can reach `127.0.0.1:18777` and read the token
+file** can make your browser:
 
 - read the text, links and frame structure of pages you are signed in to, and take screenshots
 - click, type, press keys and navigate
@@ -43,8 +43,10 @@ these judgements for you:
    look: granting "all sites" hands over read access to the whole browser, and the `cookies`
    permission, once granted, applies to **every** open tab rather than only to the sites you
    authorised.
-5. **Who else is on the machine.** The bridge has no authentication. Any local process that can
-   reach the port can drive it. Do not run it on a shared or already-compromised machine.
+5. **Who else is on the machine.** The bridge requires a shared token that the extension reads
+   from `chrome.storage.local`. A second extension cannot read the token file, so it cannot drive
+   the bridge. However, a local process running as the same user can read the token from disk.
+   Do not run it on a shared or already-compromised machine.
 
 ## 3. What it is not
 

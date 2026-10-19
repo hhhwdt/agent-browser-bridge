@@ -58,3 +58,49 @@ jobs:
         env:
           ABB_MCP_OFFLINE: '1'
         run: node test/test-offline.js
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: 浏览器层测试（headless Chrome + test-live.js）
+        run: |
+          node src/server.js &
+          SERVER_PID=$!
+          sleep 2
+          CHROME_PATH=$(which google-chrome || which chromium || which chromium-browser)
+          if [ -z "$CHROME_PATH" ]; then
+            echo "Chrome not found"
+            exit 1
+          fi
+          "$CHROME_PATH" \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --load-extension="$(pwd)/extension" \
+            --user-data-dir="/tmp/abb-ci-profile" \
+            --remote-debugging-port=9222 \
+            about:blank &
+          CHROME_PID=$!
+          echo "等待扩展连接..."
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:18777/health | grep -q '"extensionConnected":true'; then
+              echo "扩展已连接"
+              break
+            fi
+            sleep 1
+          done
+          node test/test-live.js
+          TEST_EXIT=$?
+          kill $CHROME_PID 2>/dev/null || true
+          kill $SERVER_PID 2>/dev/null || true
+          exit $TEST_EXIT

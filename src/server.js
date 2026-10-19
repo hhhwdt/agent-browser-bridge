@@ -39,6 +39,9 @@
 
 const http = require('node:http');
 const { URL } = require('node:url');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
 
 /* ------------------------------------------------------------------ *
  * 配置
@@ -71,6 +74,55 @@ for (let i = 0; i < argv.length; i++) {
     allowedExtensionIds.add(String(argv[i + 1]).trim().toLowerCase());
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * 共享 token（桥接与扩展之间的信任边界）
+ *
+ * 扩展声明了 127.0.0.1:18777 的 host_permissions，它的请求不带 Origin，
+ * 服务端无法区分它和任何本机程序。共享 token 让服务端能验证请求方确实是
+ * 持有 token 文件的那个扩展——其他扩展和网页都拿不到这个文件。
+ *
+ * 不关闭的风险：同机任意程序都能驱动你的浏览器登录态。
+ * 不关闭的代价：首次使用需要把 token 粘贴到扩展弹窗里。
+ * ------------------------------------------------------------------ */
+
+const NO_TOKEN = argv.includes('--no-token');
+
+/** token 文件路径：--token-file 覆盖，否则用配置目录下的 token。 */
+const TOKEN_FILE = argValue('--token-file', null) || path.join(getConfigDir(), 'token');
+
+/**
+ * 读取或生成 token。
+ * 首次启动时生成 32 字节随机 hex，写入 0600 权限的文件。
+ * --no-token 时返回 null，跳过所有校验（仅用于开发调试）。
+ */
+function loadToken() {
+  if (NO_TOKEN) { return null; }
+  try {
+    return fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+  } catch (e) {
+    // 文件不存在，生成新 token
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true });
+    fs.writeFileSync(TOKEN_FILE, token, { mode: 0o600 });
+    console.log(`[token] 已生成新 token: ${TOKEN_FILE}`);
+    console.log('[token] 请把 token 粘贴到扩展弹窗的输入框里');
+  } catch (e) {
+    console.error(`[token] 无法写入 token 文件: ${e.message}`);
+  }
+  return token;
+}
+
+const TOKEN = loadToken();
+
+/** 校验请求头 X-ABB-Token。TOKEN 为 null 时跳过（--no-token 模式）。 */
+function hasValidToken(req) {
+  if (!TOKEN) { return true; }
+  return req.headers['x-abb-token'] === TOKEN;
+}
+
 const POLL_HOLD_MS = 25000;      // 扩展长轮询的挂起时长
 const READ_TIMEOUT_MS = 30000;   // 单次操作的默认等待上限
 const MAX_QUEUE = 100;           // 单浏览器队列上限，防止无扩展连接时无限堆积
@@ -115,6 +167,92 @@ const CAPABILITIES = [
   'reload',       // 重新加载扩展自身（开发用）
   'multiBrowser'  // 多浏览器隔离与路由
 ];
+
+/* ------------------------------------------------------------------ *
+ * 审计日志
+ *
+ * 记录"什么时间、谁、对哪个目标、做了什么、结果如何"。
+ * 只记动作元数据，绝不记页面内容——日志回答的是"动了什么"，不是"页面上有什么"。
+ * ------------------------------------------------------------------ */
+
+/** 每用户配置目录：Windows 用 %APPDATA%，其他用 XDG_CONFIG_HOME 或 ~/.config。 */
+function getConfigDir() {
+  if (process.platform === 'win32') {
+    const base = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming');
+    return path.join(base, 'agent-browser-bridge');
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '', '.config'), 'agent-browser-bridge');
+}
+
+/** 审计日志文件路径：--log-file 覆盖，否则用配置目录下的 audit.jsonl。 */
+const AUDIT_LOG_FILE = argValue('--log-file', null) || path.join(getConfigDir(), 'audit.jsonl');
+
+/** 日志文件大小上限：10MB。超限时轮转一次（audit.jsonl → audit.1.jsonl）。 */
+const AUDIT_LOG_CAP = 10 * 1024 * 1024;
+
+/**
+ * 不记录审计日志的动作：查询与诊断类，不是"对页面做了什么"。
+ * tabs/frames/media 是查询，diag 是扩展自检，都不算用户动作。
+ */
+const AUDIT_SKIP = new Set(['tabs', 'frames', 'media', 'diag']);
+
+/* ------------------------------------------------------------------ *
+ * Per-tab lease：防止两个 agent 同时操作同一个标签页
+ *
+ * caller 用 remotePort 标识。lease 在完成、超时或标签页关闭时释放。
+ * opt-in：只有 task.lease 为 true 时才获取 lease。
+ * ------------------------------------------------------------------ */
+
+const tabLeases = new Map(); // tabId -> { caller, ts }
+
+/** 尝试获取标签页 lease。返回 true 表示获取成功，false 表示被其他 caller 持有。 */
+function acquireTabLease(tabId, caller) {
+  const existing = tabLeases.get(tabId);
+  if (existing && existing.caller !== caller) {
+    // 被其他 caller 持有，检查是否超时（5 分钟）
+    if (Date.now() - existing.ts < 5 * 60 * 1000) {
+      return false;
+    }
+  }
+  tabLeases.set(tabId, { caller, ts: Date.now() });
+  return true;
+}
+
+/** 释放标签页 lease。 */
+function releaseTabLease(tabId, caller) {
+  const existing = tabLeases.get(tabId);
+  if (existing && existing.caller === caller) {
+    tabLeases.delete(tabId);
+  }
+}
+
+/**
+ * 写一条审计日志。
+ * entry: { timestamp, action, target, outcome, duration, caller }
+ * 失败时只打 stderr，不影响主功能。
+ */
+function logAudit(entry) {
+  if (AUDIT_SKIP.has(entry.action)) { return; }
+  try {
+    const line = JSON.stringify(entry) + '\n';
+
+    // 检查是否需要轮转
+    try {
+      const stat = fs.statSync(AUDIT_LOG_FILE);
+      if (stat.size >= AUDIT_LOG_CAP) {
+        const rotated = AUDIT_LOG_FILE + '.1';
+        try { fs.unlinkSync(rotated); } catch (e) { /* 不存在则忽略 */ }
+        fs.renameSync(AUDIT_LOG_FILE, rotated);
+      }
+    } catch (e) {
+      // 文件不存在，无需轮转
+    }
+
+    fs.appendFileSync(AUDIT_LOG_FILE, line, 'utf8');
+  } catch (e) {
+    console.error('[audit] 写入失败:', e.message);
+  }
+}
 
 /* ------------------------------------------------------------------ *
  * 状态
@@ -407,7 +545,54 @@ function extensionOffline(res, req) {
 
 /** 派发任务并按 ok / 502 回包——绝大多数接口的收尾都是这三行。 */
 async function replyDispatch(res, req, task, timeoutMs) {
-  const result = await dispatch(task, timeoutMs);
+  const startTime = Date.now();
+  const caller = req.socket.remotePort;
+
+  // per-tab lease：防止两个 agent 同时操作同一个标签页
+  if (task.lease && typeof task.tabId === 'number') {
+    if (!acquireTabLease(task.tabId, caller)) {
+      const holder = tabLeases.get(task.tabId);
+      sendJson(res, 409, {
+        ok: false,
+        error: 'tab_busy',
+        tabId: task.tabId,
+        hint: `标签页正被其他 caller 持有（${holder ? holder.caller : 'unknown'}）。稍后再试，或不传 lease 跳过。`
+      }, req);
+      return;
+    }
+  }
+
+  let result;
+  try {
+    result = await dispatch(task, timeoutMs);
+
+    // autoActivate：遇到冻结标签页时先唤醒再重试一次
+    if (!result.ok && result.error === 'tab_unresponsive' && task.autoActivate && typeof task.tabId === 'number') {
+      await dispatch({ action: 'activate', tabId: task.tabId, browser: task.browser }, 10000);
+      result = await dispatch(task, timeoutMs);
+    }
+  } finally {
+    if (task.lease && typeof task.tabId === 'number') {
+      releaseTabLease(task.tabId, caller);
+    }
+  }
+
+  const duration = Date.now() - startTime;
+
+  // 审计日志：只记动作元数据，不记页面内容
+  logAudit({
+    timestamp: new Date().toISOString(),
+    action: task.action,
+    target: {
+      match: task.match || undefined,
+      tabId: task.tabId || undefined,
+      host: task.url ? (() => { try { return new URL(task.url).host; } catch (e) { return undefined; } })() : undefined
+    },
+    outcome: result.ok ? 'ok' : (result.error || 'unknown'),
+    duration,
+    caller: req.socket.remotePort
+  });
+
   sendJson(res, result.ok ? 200 : 502, result, req);
 }
 
@@ -551,7 +736,10 @@ async function routeRead(req, res) {
     frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
     selector: body.selector,
     includeLinks: !!body.includeLinks,
-    returnHtml: !!body.returnHtml
+    returnHtml: !!body.returnHtml,
+    format: body.format,
+    autoActivate: !!body.autoActivate,
+    lease: !!body.lease
   }, clampTimeout(body.timeoutMs));
 }
 
@@ -845,8 +1033,8 @@ async function routeWait(req, res) {
     badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
     return;
   }
-  if (!body.selector && !body.text) {
-    badRequest(res, req, 'missing_condition', '需要提供 selector 或 text 作为等待条件');
+  if (!body.selector && !body.text && !body.url && !body.idleMs) {
+    badRequest(res, req, 'missing_condition', '需要提供 selector、text、url 或 idleMs 作为等待条件');
     return;
   }
   const waitMs = clampTimeout(body.timeoutMs, 10000);
@@ -859,6 +1047,9 @@ async function routeWait(req, res) {
     frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
     selector: body.selector,
     text: body.text,
+    url: body.url,
+    count: typeof body.count === 'number' ? body.count : undefined,
+    idleMs: typeof body.idleMs === 'number' ? body.idleMs : undefined,
     state: body.state === 'disappear' ? 'disappear' : 'appear',
     timeoutMs: waitMs,
     pollMs: body.pollMs
@@ -958,6 +1149,35 @@ async function routeMark(req, res, ctx) {
   sendJson(res, result.ok ? 200 : 502, result, req);
 }
 
+/** 批量执行动作：按顺序执行，每步独立返回结果，第一步失败时停止。 */
+async function routeBatch(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) { return; }
+  if (!Array.isArray(body.steps) || body.steps.length === 0) {
+    badRequest(res, req, 'missing_steps', '需要提供 steps 数组');
+    return;
+  }
+  if (body.steps.length > 20) {
+    badRequest(res, req, 'too_many_steps', '单次最多 20 步');
+    return;
+  }
+
+  const results = [];
+  for (let i = 0; i < body.steps.length; i++) {
+    const step = body.steps[i];
+    if (!step || typeof step !== 'object' || !step.action) {
+      results.push({ step: i, ok: false, error: 'invalid_step' });
+      break;
+    }
+    const result = await dispatch(step, clampTimeout(step.timeoutMs));
+    results.push({ step: i, action: step.action, ok: result.ok, data: result.data, error: result.error });
+    if (!result.ok && !body.continueOnError) { break; }
+  }
+
+  const allOk = results.every((r) => r.ok);
+  sendJson(res, allOk ? 200 : 502, { ok: allOk, results }, req);
+}
+
 /* ------------------------------------------------------------------ *
  * 路由表
  *
@@ -989,7 +1209,8 @@ for (const [method, paths, handler] of [
   ['POST', ['/activate'], routeActivate],
   ['POST', ['/diag'], routeDiag],
   ['POST', ['/reload'], routeReload],
-  ['POST', ['/mark', '/unmark'], routeMark]
+  ['POST', ['/mark', '/unmark'], routeMark],
+  ['POST', ['/batch'], routeBatch]
 ]) {
   for (const p of paths) { ROUTES.set(`${method} ${p}`, handler); }
 }
@@ -1030,6 +1251,17 @@ async function handle(req, res) {
     sendJson(res, 404, { ok: false, error: 'not_found', path }, req);
     return;
   }
+
+  // token 校验：/health 保持开放（用于探测服务在线），其余路由都需要
+  if (path !== '/health' && !hasValidToken(req)) {
+    sendJson(res, 401, {
+      ok: false,
+      error: 'token_required',
+      hint: '需要 X-ABB-Token 请求头。请从桥接服务配置目录的 token 文件复制到扩展弹窗。'
+    }, req);
+    return;
+  }
+
   await route(req, res, { url, path });
 }
 
@@ -1042,9 +1274,74 @@ const server = http.createServer((req, res) => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * 更新检查
+ *
+ * 启动时和 diag 时检查 npm registry 上是否有新版本。
+ * Fire-and-forget：不延迟启动，缓存一天，离线时不失败。
+ * ------------------------------------------------------------------ */
+
+const NO_UPDATE_CHECK = argv.includes('--no-update-check');
+const UPDATE_CHECK_URL = 'https://registry.npmjs.org/agent-browser-bridge/latest';
+const UPDATE_CHECK_CACHE_MS = 24 * 60 * 60 * 1000; // 一天
+
+/** 比较两个 semver 版本，返回 true 如果 a > b。 */
+function isNewerVersion(a, b) {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) { return true; }
+    if (na < nb) { return false; }
+  }
+  return false;
+}
+
+/** 检查更新，有新版本时打印一行提示。 */
+async function checkUpdate() {
+  if (NO_UPDATE_CHECK) { return; }
+  try {
+    const cacheFile = path.join(getConfigDir(), 'update-check.json');
+    // 读缓存
+    try {
+      const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      if (cached && cached.ts && Date.now() - cached.ts < UPDATE_CHECK_CACHE_MS) {
+        if (cached.newer && isNewerVersion(cached.newer, cached.current)) {
+          console.log(`[update] 新版本可用: ${cached.newer}（当前 ${cached.current}）`);
+        }
+        return;
+      }
+    } catch (e) { /* 缓存不存在或损坏 */ }
+
+    // 发起请求
+    const res = await fetch(UPDATE_CHECK_URL, {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) { return; }
+    const data = await res.json();
+    const latest = data.version;
+    const current = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+
+    // 写缓存
+    try {
+      fs.mkdirSync(getConfigDir(), { recursive: true });
+      fs.writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), newer: latest, current }), 'utf8');
+    } catch (e) { /* 忽略 */ }
+
+    if (isNewerVersion(latest, current)) {
+      console.log(`[update] 新版本可用: ${latest}（当前 ${current}）`);
+      console.log('[update] 运行 npm update -g agent-browser-bridge 更新');
+    }
+  } catch (e) {
+    // 离线或网络错误，静默失败
+  }
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`Agent Browser Bridge 已启动: http://${HOST}:${PORT}`);
   console.log('等待浏览器扩展连接…');
+  checkUpdate();
 });
 
 server.on('error', (e) => {

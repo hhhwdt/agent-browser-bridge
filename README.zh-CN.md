@@ -11,8 +11,8 @@
 
 ---
 
-> **装之前先读这一段。** 桥接服务一旦跑起来，本机上任何能访问它端口的程序，都能用**你自己的登录
-> 态**在浏览器里操作，包括你没在看着的时候。[免责声明与使用须知](docs/DISCLAIMER.zh-CN.md) 写清了它
+> **装之前先读这一段。** 桥接服务一旦跑起来，本机上任何能访问它端口并能读取 token 文件的程序，
+> 都能用**你自己的登录态**在浏览器里操作，包括你没在看着的时候。[免责声明与使用须知](docs/DISCLAIMER.zh-CN.md) 写清了它
 > 能做什么、哪些判断必须你自己做、以及它不是用来干什么的。威胁模型和**尚未封堵**的缺口在
 > [SECURITY.md](docs/SECURITY.md)，读取与存储了什么在 [PRIVACY.md](docs/PRIVACY.md)。
 
@@ -28,6 +28,7 @@
 - [权限模型](#权限模型)
 - [给 agent 用（MCP）](#给-agent-用mcp)
 - [用法](#用法)
+- [1.8.0 新功能](#180-新功能)
 - [把文件从页面里取出来](#把文件从页面里取出来)
 - [发现页面里的媒体](#发现页面里的媒体)
 - [看到 agent 正在做什么](#看到-agent-正在做什么)
@@ -60,7 +61,7 @@ CDN 拒绝跨域读取。
 
 ```mermaid
 flowchart LR
-    A["agent<br/>（CLI / client.js / 任意 HTTP）"] -->|"HTTP<br/>127.0.0.1:18777"| S["server.js<br/>本地桥接服务"]
+    A["agent<br/>（CLI / client.js / 任意 HTTP）"] -->|"HTTP + X-ABB-Token<br/>127.0.0.1:18777"| S["server.js<br/>本地桥接服务"]
     S <-->|"长轮询<br/>每个浏览器独立队列"| X["扩展<br/>service worker"]
     X -->|"chrome.scripting"| T["你的标签页"]
     X -->|"chrome.debugger（CDP）"| C["Fetch / Page 域"]
@@ -76,7 +77,7 @@ sequenceDiagram
     participant S as 桥接服务
     participant X as 扩展
     participant B as 浏览器标签页
-    A->>S: POST /read { match }
+    A->>S: POST /read { match, X-ABB-Token }
     S->>X: 通过长轮询下发任务
     X->>B: executeScript（覆盖所有框架）
     B-->>X: 提取到的文本
@@ -98,7 +99,7 @@ sequenceDiagram
 | `type` | 写入输入框、文本域、`contenteditable` 与 `designMode` 编辑器 |
 | `key` | 向页面内处理器派发按键事件 |
 | `navigate` | 在后台标签页打开地址；等待导航真正提交 |
-| `wait` | 等待元素或文字出现 / 消失 |
+| `wait` | 等待元素/文字出现消失、URL 包含子串、元素数量达标、网络空闲 |
 | `eval` | 在页面里执行 JavaScript 并取回结果 |
 | `screenshot` | 元素、整页或后台标签页截图 |
 | `media` | 列出页面里所有媒体候选（视频、流清单、图片、音频） |
@@ -110,6 +111,10 @@ sequenceDiagram
 | `tabs` `mark` `unmark` `close` `activate` | 标签页管理，以及「agent 正在操作」的可见标记 |
 | `frames` | 诊断编辑器在哪个框架、以何种方式可编辑 |
 | `diag` | 扩展运行诊断：版本、轮询、重启次数、错误日志 |
+| `batch` | 批量执行多个动作，按顺序执行，每步独立返回结果 |
+| `read --format markdown` | 获取结构化 Markdown 而非纯文本 |
+| `read --auto-activate` | 自动唤醒冻结标签页并重试 |
+| `read --lease` | 获取标签页独占锁，防止两个 agent 同时操作 |
 
 Chrome 与 Edge 可同时使用，彼此完全隔离，且自动选路。
 
@@ -177,6 +182,18 @@ npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个�
 > `edge://extensions`）检查有没有旧 ID 的残留条目，有就删掉。想确认服务端和扩展对得上，跑
 > `node src/cli.js diag` 看 `extensionId`，与 `/health` 里的 `allowedExtensionIds` 比对。
 
+**3b. 粘贴桥接 token**
+
+桥接服务首次启动时会生成 token。扩展需要它来证明身份。
+
+1. 找到 token 文件（桥接服务启动时会打印路径）：
+   - Windows：`%APPDATA%\agent-browser-bridge\token`
+   - macOS/Linux：`~/.config/agent-browser-bridge/token`
+2. 复制 token（64 位十六进制字符串）。
+3. 粘贴到扩展弹窗的"桥接 token"输入框，点**保存 token**。
+
+或者运行 `node src/cli.js token --show` 打印 token。
+
 ## 权限模型
 
 安装时的索取刻意保持最小。有两件事值得说明 —— 它们是 Chrome 的规则决定的，不是我们的选择：
@@ -188,6 +205,9 @@ npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个�
 | `downloads` | **必需** | 支撑 `save` 与 `grab` |
 | `cookies` | **可选** | 支撑 `session`。只有你在弹窗里点「授予」才会申请；在此之前 `session` 返回 `permission_not_granted`。注意范围：授予后对**所有**已打开标签页的 Cookie 生效，不止你授权过的站点 |
 | 站点访问（`*://*/*`） | **可选** | 由弹窗逐站授予，安装时绝不索取 |
+
+桥接服务还会在配置目录生成一个 token 文件（`%APPDATA%\agent-browser-bridge\token` 或
+`~/.config/agent-browser-bridge/token`），扩展凭此证明身份。其他扩展无法读取该文件。
 
 如果你不想把 `debugger` 交出去，删掉 `upload`、`screenshot`、`grab` 三个动作即可 —— 其他功能
 不依赖它。
@@ -268,6 +288,12 @@ node src/cli.js eval       --match "example.com" --code "document.title"
 node src/cli.js screenshot --match "example.com" --out shot.png --selector "table"
 node src/cli.js session    --match "example.com" --name SESSION
 node src/cli.js upload     --match "example.com" --file /path/to/report.pdf
+
+# 桥接管理
+node src/cli.js token          # 显示 token 文件路径
+node src/cli.js token --show   # 打印 token
+node src/cli.js log            # 显示最近 50 条审计日志
+node src/cli.js batch steps.json  # 批量执行动作
 ```
 
 `--dryRun` 只回报「点击会命中什么」而不真的点，适合自动化流程里先探测：
@@ -298,6 +324,47 @@ await ab.grab({ match: 'example.com/watch', url: media.videos[0].src, filename: 
 ```
 
 失败时抛出 `BridgeError`，用 `err.code` 判断原因；服务未启动则抛 `BridgeUnavailableError`。
+
+### 1.8.0 新功能
+
+**共享 token。** 桥接服务首次启动时生成 token，在扩展弹窗里粘贴一次。其他扩展无法读取 token 文件，无法驱动桥接。
+
+**批量动作。** 一次调用执行多个动作：
+
+```js
+await ab.batch([
+  { action: 'read', match: 'example.com' },
+  { action: 'click', match: 'example.com', selector: '#next' },
+  { action: 'wait', match: 'example.com', selector: '#loaded' }
+]);
+```
+
+**Per-tab lease。** 防止两个 agent 同时操作同一标签页：
+
+```js
+await ab.read({ match: 'example.com', lease: true });
+```
+
+**Auto-activate。** 自动唤醒冻结标签页并重试：
+
+```js
+await ab.read({ match: 'example.com', autoActivate: true });
+```
+
+**Markdown 输出。** 获取结构化 Markdown 而非纯文本：
+
+```js
+const page = await ab.read({ match: 'example.com', format: 'markdown' });
+console.log(page.markdown);
+```
+
+**等待 URL、元素数量或网络空闲：**
+
+```js
+await ab.wait({ match: 'example.com', url: '/dashboard' });
+await ab.wait({ match: 'example.com', selector: '.item', count: 5 });
+await ab.wait({ match: 'example.com', idleMs: 2000 });
+```
 
 ### HTTP 接口
 
@@ -393,6 +460,9 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 - 会自己改写 `document.title` 的页面（仪表盘、SPA）会把标题标记冲掉，只剩半截标记。因此清理
   逻辑同时按标题前缀**和**标签页的 `favIconUrl` 来发现标记，而不是只看标题。
 
+除了可见标记，桥接服务还会把每个动作写入审计日志（`audit.jsonl`），记录时间、动作、目标、结果和耗时。
+日志只记动作元数据，绝不记页面内容。用 `node src/cli.js log` 查看。
+
 ## 难缠的页面
 
 真实网站比测试页乱得多。以下情况都已处理，每一条都是因为实践中出了问题才加的：
@@ -403,7 +473,7 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 | **编辑器用 `designMode`** | 识别 `designMode` 并用该框架的 body 作为目标，因为没有元素带 `contenteditable` |
 | **编辑器只在页面可见时渲染** | 如实报告；用 `activate` 把标签页切到前台唤醒它 |
 | **按钮绑定在 `mousedown` 上** | 派发完整的指针/鼠标事件序列，而不是只调 `.click()` |
-| **冻结的后台标签页** | 每次注入都带超时，快速失败为 `tab_unresponsive`，而不是把任务挂死 |
+| **冻结的后台标签页** | 每次注入都带超时，快速失败为 `tab_unresponsive`，而不是把任务挂死。报错会指明下一步：先 `activate` 再重试，或用 `--auto-activate` 自动唤醒 |
 | **站点校验 `Referer` / 拒绝 CORS** | 用 `grab`（见上） |
 | **Chrome 与 Edge 同时打开** | 每个浏览器独立队列；扩展会拒收不是发给自己的任务；未指定浏览器时逐个尝试直到找到标签页 |
 
@@ -417,8 +487,9 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 - 站点访问**默认拒绝**，由浏览器权限系统强制。安装清单除本机桥接地址外不索取任何主机权限。
 - 服务端拒绝不在允许列表里的扩展 ID，因此一个**没有**申请访问桥接地址的扩展只会拿到 403，
   而不是浏览器控制权。清单里带公钥，正是为了让这个 ID 在所有源码安装之间保持一致。
-  但这只是减速带：任何**不带 `Origin`** 的请求看起来都和真扩展一样，其中包括那些确实声明了
-  `127.0.0.1:18777` 主机权限的扩展。为什么真正的边界需要共享密钥，见 [SECURITY.md](docs/SECURITY.md)。
+- 桥接服务要求 `X-ABB-Token` 请求头，扩展从 `chrome.storage.local` 读取 token（在弹窗里粘贴一次）。
+  其他扩展无法读取 token 文件，无法驱动桥接。但同用户进程能从磁盘读取 token 文件。
+  见 [SECURITY.md](docs/SECURITY.md)。
 - 高权限能力被拆开：`cookies` 是可选的，未在弹窗中授予前一律关闭；依赖 `debugger` 的动作之所以
   声明为必需，只是因为 Chrome 不允许另一种写法。
 - 读操作没有副作用。写操作按风险分级，并把实际点击/输入的内容回报给调用方。
@@ -429,10 +500,10 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 - `grab` 只在那一次调用期间、只针对那一个 CDN origin 注入宽松的 CORS 头。拦截范围限定在该
   origin，其余请求原样放行，调用结束立刻卸载调试器。
 
-由于 `eval`、`session`、`download` 都是很强的原语，**任何能访问本机桥接服务的进程**在授权后都能
+由于 `eval`、`session`、`download` 都是很强的原语，**任何能访问本机桥接服务并能读取 token 文件的进程**在授权后都能
 使用它们。请确保 18777 端口只留在回环地址上。
 
-这个模型**没有**覆盖的部分（其他浏览器扩展、不带 Origin 的请求、以及使用者本人）逐条列在
+这个模型**没有**覆盖的部分（同用户进程、以及使用者本人）逐条列在
 [SECURITY.md](docs/SECURITY.md)。不要把上面这段总结读成比那份文件更强的承诺。
 
 ## 测试
@@ -460,6 +531,15 @@ node test/test-offline.js        # 跑下面全部套件，最后给汇总
 | `check-version.js` | `package.json` 与清单里的版本号一致，免得 `diag` 报的版本和 registry 上的对不上 |
 | `check-package.js` | 发布包里不能有未纳入版本控制的文件；`npm pack` 会强制带上 `README*`，本机运维文档差点就这样被传上去 |
 | `test-mcp.js` | MCP 协议本身，自己充当客户端对话，而不是引入 SDK |
+| `test-i18n-keys.js` | 弹窗 i18n key 与 locale 文件一致——缺 key 时 `getMessage` 返回空字符串，表现为一片空白 |
+| `test-wait.js` | 每种等待条件（selector、text、url、count、idle）成立时返回 ok，不成立时返回 wait_timeout |
+| `test-audit.js` | 审计日志记录动作但不泄露页面内容——泄露"谁读了什么"的日志比没有日志更糟 |
+| `test-token.js` | 共享 token 的生成、校验、拒绝——没有 token 时任何本机程序都能驱动桥接 |
+| `test-update.js` | 版本比较逻辑——用户看到错误的更新提示，或该提示时没提示 |
+| `test-markdown.js` | HTML 转 Markdown——结构丢失或页面内容原样塞进 Markdown |
+| `test-frozen-tab.js` | 冻结标签页的报错指明下一步——用户不知道该先 activate 再重试 |
+| `test-batch.js` | 批量动作的执行顺序与停止条件——批量绕过风险护栏或步骤乱序 |
+| `test-lease.js` | Per-tab lease 的获取与释放——两个 agent 在同一标签页上交错执行 |
 
 `test-mcp.js` 在设了 `ABB_MCP_OFFLINE=1` 时会跳过需要扩展的那一节，CI 用的就是这个。同一套件在
 Linux（Node 18/20/22）和 Windows（Node 18/22）上各跑一遍——Windows 才是这工具的主场平台，
@@ -512,7 +592,8 @@ src/                     Node 这一侧
   setup.js               一条命令自检：缺哪一层、下一步做什么
 extension/               MV3 扩展（Chrome + Edge 通用）
   manifest.json          权限、入口、公钥
-  popup.html/.js         状态、站点授权、可选权限、清除标记
+  popup.html/.js         状态、站点授权、可选权限、token 配置、清除标记
+  _locales/               i18n 文案（en + zh_CN）
   sw/                    service worker，按职责拆分
     background.js        轮询、任务分派、启动、事件监听
     actions.js           一个动作一个函数
@@ -523,7 +604,7 @@ extension/               MV3 扩展（Chrome + Edge 通用）
 test/                    测试——哪些需要浏览器见上面的「测试」一节
   config.js              测试页配置的加载器（test-config.js 是你自己的，已被忽略）
 tools/                   离线检查：注入函数自包含、扩展 ID 一致
-scripts/                 Windows 下把桥接当服务跑的辅助脚本
+scripts/                 Windows 辅助脚本：登录时启动桥接、启动/重启桥接
 docs/                    免责声明、安全模型、隐私说明、快速开始、架构说明
 ```
 
@@ -548,6 +629,9 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 - **DRM 保护的内容不在范围内。** 这类内容的解密密钥在授权服务器与硬件安全通路之后，拿到它就
   等于破解保护机制本身，本项目不做这件事。
 - 与任何浏览器厂商无关，只使用有文档的扩展 API。
+- 共享 token 能防其他扩展，但同用户进程能从磁盘读取 token 文件。不要在共享或已受损的机器上运行桥接。
+- 批量动作不是事务性的：第 3 步失败时，前 2 步已提交。只有当后续步骤不依赖前面结果时才用 `continueOnError: true`。
+- Per-tab lease 5 分钟后过期。调用者崩溃后，lease 会阻塞其他人直到过期。
 
 ## 参与开发
 

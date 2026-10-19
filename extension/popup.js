@@ -7,6 +7,11 @@
  *
  * 说明：浏览器要求站点授权必须由用户手势触发，因此授权只能在这个弹窗里由用户
  * 手动完成，后台服务脚本无法代为授权。
+ *
+ * 国际化：所有可见字符串都通过 chrome.i18n.getMessage 取自 _locales/，
+ * HTML 里用 data-i18n / data-i18n-html 标记，JS 里直接调 getMessage。
+ * 缺 key 时 getMessage 返回空字符串——弹窗上表现为一片空白，不报错。
+ * test/test-i18n-keys.js 钉住每个用过的 key 在两个 locale 文件里都存在。
  */
 
 const BRIDGE_URL = 'http://127.0.0.1:18777';
@@ -24,8 +29,9 @@ const DEFAULT_ORIGINS = [
 // as optional"），它只能是必需权限，因此不在这里申请——请求未声明的权限会抛
 // "Only permissions specified in the manifest may be requested"。
 const ADV_PERMISSIONS = ['cookies'];
+// 值是 i18n key，不是显示文本
 const ADV_LABELS = {
-  cookies: 'cookies — 读取已打开标签页的 Cookie，含 httpOnly（session 动作，授予后对所有站点生效）'
+  cookies: 'permCookies'
 };
 
 const bridgeDot = document.getElementById('bridgeDot');
@@ -33,6 +39,52 @@ const bridgeStatus = document.getElementById('bridgeStatus');
 const originList = document.getElementById('originList');
 const originInput = document.getElementById('originInput');
 const advList = document.getElementById('advList');
+const tokenInput = document.getElementById('tokenInput');
+const tokenHint = document.getElementById('tokenHint');
+
+/** 把 HTML 里 data-i18n / data-i18n-html 标记的元素填上本地化文本。 */
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = chrome.i18n.getMessage(el.getAttribute('data-i18n'));
+  });
+  document.querySelectorAll('[data-i18n-html]').forEach((el) => {
+    el.innerHTML = chrome.i18n.getMessage(el.getAttribute('data-i18n-html'));
+  });
+  document.documentElement.lang = chrome.i18n.getUILanguage();
+  originInput.placeholder = chrome.i18n.getMessage('originPlaceholder');
+  tokenInput.placeholder = chrome.i18n.getMessage('tokenPlaceholder');
+}
+
+/** 从 chrome.storage.local 读取已保存的 token 并显示。 */
+async function refreshToken() {
+  try {
+    const stored = await chrome.storage.local.get('abb-token');
+    const token = stored && stored['abb-token'];
+    if (token) {
+      tokenInput.value = token;
+      tokenHint.textContent = chrome.i18n.getMessage('tokenHintSaved');
+      tokenHint.style.color = '#1a7f37';
+    }
+  } catch (e) { /* 忽略 */ }
+}
+
+/** 保存 token 到 chrome.storage.local。 */
+document.getElementById('tokenSaveBtn').addEventListener('click', async () => {
+  const token = tokenInput.value.trim();
+  if (!token) {
+    tokenHint.textContent = chrome.i18n.getMessage('tokenHintEmpty');
+    tokenHint.style.color = '#cf222e';
+    return;
+  }
+  try {
+    await chrome.storage.local.set({ 'abb-token': token });
+    tokenHint.textContent = chrome.i18n.getMessage('tokenHintSaved');
+    tokenHint.style.color = '#1a7f37';
+  } catch (e) {
+    tokenHint.textContent = chrome.i18n.getMessage('tokenHintError');
+    tokenHint.style.color = '#cf222e';
+  }
+});
 
 /** 规范化用户输入的站点，返回可授权的 origin 模式。 */
 function toOriginPattern(raw) {
@@ -63,14 +115,14 @@ async function refreshBridgeStatus() {
     const data = await res.json();
     if (data && data.extensionConnected) {
       bridgeDot.className = 'dot ok';
-      bridgeStatus.textContent = '桥接服务在线，扩展已连接';
+      bridgeStatus.textContent = chrome.i18n.getMessage('statusOnline');
     } else {
       bridgeDot.className = 'dot bad';
-      bridgeStatus.textContent = '桥接服务在线，但扩展未连接';
+      bridgeStatus.textContent = chrome.i18n.getMessage('statusOnlineNoExt');
     }
   } catch (e) {
     bridgeDot.className = 'dot bad';
-    bridgeStatus.textContent = '桥接服务未启动（需要运行 start-server.ps1）';
+    bridgeStatus.textContent = chrome.i18n.getMessage('statusOffline');
   }
 }
 
@@ -86,8 +138,8 @@ async function refreshOrigins() {
   };
 
   if (origins.length === 0) {
-    addItem('尚未授权任何站点');
-    addItem('读取网页前需先在下方为对应站点授权');
+    addItem(chrome.i18n.getMessage('noOrigins'));
+    addItem(chrome.i18n.getMessage('noOriginsHint'));
   } else {
     origins.forEach(addItem);
   }
@@ -107,7 +159,8 @@ async function refreshAdvancedPermissions() {
   for (const p of ADV_PERMISSIONS) {
     const li = document.createElement('li');
     const has = perms.includes(p);
-    li.textContent = (has ? '✓ ' : '✗ ') + (ADV_LABELS[p] || p);
+    const key = ADV_LABELS[p] || p;
+    li.textContent = (has ? '✓ ' : '✗ ') + chrome.i18n.getMessage(key);
     li.style.color = has ? '#1a7f37' : '#656d76';
     advList.appendChild(li);
   }
@@ -116,7 +169,7 @@ async function refreshAdvancedPermissions() {
 document.getElementById('grantAdvBtn').addEventListener('click', async () => {
   const ok = await chrome.permissions.request({ permissions: ADV_PERMISSIONS });
   if (!ok) {
-    alert('未获得授权。');
+    alert(chrome.i18n.getMessage('alertNotGranted'));
   }
   await refreshAdvancedPermissions();
 });
@@ -128,14 +181,14 @@ document.getElementById('revokeAdvBtn').addEventListener('click', async () => {
 
 async function grant(pattern) {
   if (!pattern) {
-    alert('请输入有效的站点，例如 confluence.example.com');
+    alert(chrome.i18n.getMessage('alertInvalidOrigin'));
     return;
   }
   const ok = await chrome.permissions.request({ origins: [pattern] });
   if (ok) {
     await refreshOrigins();
   } else {
-    alert('未获得授权');
+    alert(chrome.i18n.getMessage('alertNotGranted'));
   }
 }
 
@@ -146,16 +199,16 @@ document.getElementById('grantBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('grantAllBtn').addEventListener('click', async () => {
-  if (!confirm('将授权读取所有网站的页面内容，确认继续？')) { return; }
+  if (!confirm(chrome.i18n.getMessage('confirmGrantAll'))) { return; }
   await grant('*://*/*');
 });
 
 document.getElementById('revokeAllBtn').addEventListener('click', async () => {
-  if (!confirm('将撤销所有可撤销的站点授权（清单中默认授权的站点不受影响），确认继续？')) { return; }
+  if (!confirm(chrome.i18n.getMessage('confirmRevokeAll'))) { return; }
   const granted = await chrome.permissions.getAll();
   const origins = (granted.origins || []).filter((o) => !DEFAULT_ORIGINS.includes(o));
   if (origins.length === 0) {
-    alert('没有可撤销的授权');
+    alert(chrome.i18n.getMessage('alertNothingToRevoke'));
     return;
   }
   await chrome.permissions.remove({ origins });
@@ -189,18 +242,18 @@ function sendToBackground(action) {
 async function refreshMarks() {
   const r = await sendToBackground('status');
   if (!r.ok) {
-    markSummary.textContent = '状态读取失败';
+    markSummary.textContent = chrome.i18n.getMessage('statusReadFailed');
     return;
   }
   markSummary.textContent = r.markedCount > 0
-    ? `已标记 ${r.markedCount} 个标签页`
-    : '当前没有标记';
+    ? chrome.i18n.getMessage('marksCount', String(r.markedCount))
+    : chrome.i18n.getMessage('noMarks');
 }
 
 document.getElementById('clearMarksBtn').addEventListener('click', async () => {
   const r = await sendToBackground('clearMarks');
   if (!r.ok) {
-    alert('清除失败：' + (r.error || '未知错误'));
+    alert(chrome.i18n.getMessage('alertClearFailed', r.error || 'unknown'));
     return;
   }
   await refreshMarks();
@@ -211,13 +264,15 @@ function refreshExtensionId() {
   try {
     extIdEl.textContent = chrome.runtime.id;
   } catch (e) {
-    extIdEl.textContent = '读取失败';
+    extIdEl.textContent = chrome.i18n.getMessage('readFailed');
   }
 }
 
+applyI18n();
 refreshBridgeStatus();
 refreshExtensionId();
 refreshOrigins();
 refreshMarks();
 refreshAdvancedPermissions();
+refreshToken();
 setInterval(refreshBridgeStatus, 2000);

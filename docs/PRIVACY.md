@@ -26,8 +26,8 @@ the caller did not target.
 To the local program that asked for it, over `127.0.0.1`. That is the entire data flow. Nothing is
 sent to the internet, and nothing is uploaded by this project.
 
-This also means the data is available to **any** local program that can reach the bridge port, not
-just the one that asked. See [SECURITY.md](SECURITY.md).
+The bridge requires a shared token, so a second extension cannot drive it. However, a local
+process running as the same user can read the token file from disk. See [SECURITY.md](SECURITY.md).
 
 ## What is stored, and where
 
@@ -39,6 +39,9 @@ just the one that asked. See [SECURITY.md](SECURITY.md).
 | Site grants and the optional `cookies` grant | the browser's own permission store | until you revoke them in the popup |
 | In-flight tasks and results | the bridge process's memory | until the task completes or times out |
 | Startup lines | `logs/browser-bridge.log`, if you started the server with `restart-server.ps1` | until you delete the file |
+| Shared token | `%APPDATA%\agent-browser-bridge\token` (Windows) or `~/.config/agent-browser-bridge/token` | until you delete the file |
+| Audit log (action metadata only) | `%APPDATA%\agent-browser-bridge\audit.jsonl` (Windows) or `~/.config/agent-browser-bridge/audit.jsonl` | rotates at 10 MB |
+| Update check cache | `%APPDATA%\agent-browser-bridge\update-check.json` (Windows) or `~/.config/agent-browser-bridge/update-check.json` | 24 hours |
 | Files you download or save | your browser's download folder | until you delete them |
 
 Page content is never written to disk by the extension or the server. Results are held in memory

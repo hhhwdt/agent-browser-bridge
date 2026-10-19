@@ -277,6 +277,9 @@ class BrowserBridgeClient {
       selector: options.selector,
       includeLinks: !!options.includeLinks,
       returnHtml: !!options.returnHtml,
+      format: options.format,
+      autoActivate: !!options.autoActivate,
+      lease: !!options.lease,
       browser: options.browser
     }, options.timeoutMs);
   }
@@ -293,6 +296,9 @@ class BrowserBridgeClient {
       frameId: options.frameId,
       selector: options.selector,
       text: options.text,
+      url: options.url,
+      count: options.count,
+      idleMs: options.idleMs,
       state: options.state === 'disappear' ? 'disappear' : 'appear',
       timeoutMs: options.timeoutMs,
       pollMs: options.pollMs,
@@ -526,6 +532,17 @@ class BrowserBridgeClient {
       frameId: options.frameId,
       browser: options.browser
     }, options.timeoutMs);
+  }
+
+  /**
+   * 批量执行动作：按顺序执行，每步独立返回结果，第一步失败时停止。
+   * steps: 动作对象数组，每个对象至少包含 action 字段。
+   */
+  batch(steps, options = {}) {
+    return this.call('POST', '/batch', {
+      steps,
+      continueOnError: !!options.continueOnError
+    }, options.timeoutMs || 60000);
   }
 }
 

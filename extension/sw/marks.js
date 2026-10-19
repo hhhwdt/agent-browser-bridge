@@ -276,6 +276,21 @@ export async function unmarkTask(task) {
   let targets = [];
 
   if (typeof task.tabId === 'number') {
+    // 先检测该标签页是否真的有标记，避免对已无标记的标签页做无谓注入
+    const marked = await collectMarkedTabs();
+    if (!marked.includes(task.tabId)) {
+      // 标记已被页面改写冲掉，无需清除
+      return {
+        ok: true,
+        data: {
+          cleared: [],
+          failed: [],
+          browser: BROWSER_NAME,
+          markedCount: markedTabs.size,
+          note: undefined
+        }
+      };
+    }
     targets = [task.tabId];
   } else if (task.match || task.url) {
     const tab = await resolveTab(task);
@@ -283,8 +298,6 @@ export async function unmarkTask(task) {
     targets = [tab.id];
   } else {
     // 未指定目标时清除全部。
-    // 用 collectMarkedTabs 而非直接读内存：它同时按标题前缀发现残留标记，
-    // 这样即使扩展重载过、内存记录丢了，也能把页面上的标记清干净。
     const all = await chrome.tabs.query({});
     const alive = new Set(all.map((t) => t.id));
 
@@ -312,6 +325,11 @@ export async function unmarkTask(task) {
   const failed = settled
     .map((r, i) => (r.status === 'rejected' || !r.value.pageCleared ? targets[i] : null))
     .filter((id) => id !== null);
+
+  // 清理内存记录：已清除的标签页不再算"已标记"
+  for (const id of targets) {
+    markedTabs.delete(id);
+  }
   await saveMarks();
 
   return {
@@ -330,5 +348,5 @@ export async function unmarkTask(task) {
 }
 
 /* 供其他模块使用 */
-export { MARKS_KEY, markedTabs };
+export { MARKS_KEY, collectMarkedTabs, markedTabs };
 

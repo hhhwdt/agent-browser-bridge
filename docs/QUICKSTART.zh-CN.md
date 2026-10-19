@@ -1,6 +1,6 @@
 # 快速开始
 
-从零到让 agent 操控你的浏览器。六步，其中一步必须你自己点。
+从零到让 agent 操控你的浏览器。七步，其中一步必须你自己点。
 
 简体中文 · [English](QUICKSTART.md)
 
@@ -51,7 +51,19 @@ node src/setup.js
 
 可选：需要用 `session` 工具（读 Cookie 和站点存储）时，在"可选权限"那一行点**授予**。不需要就别给。
 
-## 5. 加上 MCP 服务
+## 5. 粘贴桥接 token
+
+桥接服务首次启动时会生成 token。扩展需要它来证明身份。
+
+1. 找到 token 文件（桥接服务启动时会打印路径）：
+   - Windows：`%APPDATA%\agent-browser-bridge\token`
+   - macOS/Linux：`~/.config/agent-browser-bridge/token`
+2. 复制 token（64 位十六进制字符串）。
+3. 粘贴到扩展弹窗的"桥接 token"输入框，点**保存 token**。
+
+或者运行 `node src/cli.js token --show` 打印 token。
+
+## 6. 加上 MCP 服务
 
 在仓库根目录执行，路径交给 shell 填，不用手打也不用写死：
 
@@ -75,7 +87,7 @@ claude mcp add -s user browser -- node "%CD%\src\mcp.js"      # Windows cmd
 
 **不需要手动启动桥接服务。** 端口上没有服务时，MCP 会在第一次调用时把它拉起来，之后一直留着。
 
-## 6. 确认能用
+## 7. 确认能用
 
 让 agent 调一次 `browser_status`，应该返回在线的浏览器和扩展版本。然后让它干件真事：
 
@@ -84,7 +96,7 @@ claude mcp add -s user browser -- node "%CD%\src\mcp.js"      # Windows cmd
 报 `extension_not_connected` 说明扩展没加载或没启用。报 `permission_denied` 说明第 3 步没覆盖到
 那个站点。
 
-## 7. 告诉它该怎么干活
+## 8. 告诉它该怎么干活
 
 agent 连上来时，MCP 服务会自己下发一套工作纪律（先列标签页、新页面开在后台、自己开的自己关、
 收尾清标记、不可逆动作先问），这些不用你在提示词里重复。你该说的还是你自己的要求：允许它碰
@@ -107,7 +119,8 @@ node src/cli.js diag            # 扩展版本、id、连接状态、最近错�
 | `extension_not_connected` | 扩展没加载，或加载在另一个浏览器配置里。 |
 | `permission_denied` | 该站点从没授权过。回到第 3 步。 |
 | `permission_not_granted` | `session` 工具需要可选的 `cookies` 权限。 |
-| `tab_unresponsive` | 该标签页的渲染进程冻结了。打开一次那个标签页，或换一个。 |
+| `token_required` | 桥接服务在运行但扩展没有 token。把 token 粘贴到扩展弹窗（第 5 步）。 |
+| `tab_unresponsive` | 该标签页的渲染进程冻结了。先跑 `activate` 再重试，或用 `--auto-activate`。 |
 | 全都超时 | 先跑 `node src/cli.js diag`——多半是选错了浏览器或扩展已经掉线。 |
 
 ## 各文件是什么
@@ -119,6 +132,7 @@ node src/cli.js diag            # 扩展版本、id、连接状态、最近错�
 | `src/mcp.js` | MCP 服务——agent 直接对接的就是它 |
 | `src/client.js` | 客户端库，想自己写代码调桥接时用 |
 | `src/cli.js` | 同样的能力，命令行形态 |
+| `scripts/` | Windows 辅助脚本：登录时启动桥接、启动/重启桥接 |
 | `test/` | 哪些需要浏览器见 [README](../README.zh-CN.md#测试) |
 
 ---

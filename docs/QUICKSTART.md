@@ -58,7 +58,19 @@ because the browser requires a real click from you.
 Optional: if you need the `session` tool (reading cookies and web storage), press **授予 / Grant** in
 the "optional permissions" row. Leave it off otherwise.
 
-## 5. Add the MCP server
+## 5. Paste the bridge token
+
+The bridge generates a shared token on first start. The extension needs it to prove its identity.
+
+1. Find the token file (the bridge prints its path on start):
+   - Windows: `%APPDATA%\agent-browser-bridge\token`
+   - macOS/Linux: `~/.config/agent-browser-bridge/token`
+2. Copy the token (64-character hex string).
+3. Paste it into the "Bridge token" field in the extension popup and press **保存 token / Save token**.
+
+Or run `node src/cli.js token --show` to print the token.
+
+## 6. Add the MCP server
 
 From the repository root — the shell fills in the path, so there is nothing to type or hard-code:
 
@@ -84,7 +96,7 @@ printing the manual command.
 You do **not** need to start the bridge service. The MCP server starts it on first use if the port
 is dead, and leaves it running afterwards.
 
-## 6. Check it works
+## 7. Check it works
 
 Ask the agent to call `browser_status`. It should come back with the online browsers and the
 extension version. Then ask for something real:
@@ -94,7 +106,7 @@ extension version. Then ask for something real:
 If the agent reports `extension_not_connected`, the extension is not loaded or not enabled.
 If it reports `permission_denied`, step 3 did not cover that site.
 
-## 7. Tell it how to behave
+## 8. Tell it how to behave
 
 The MCP server sends its own working rules when an agent connects (list tabs first, open new tabs in
 the background, close what you opened, clear marks when done, ask before irreversible actions). You
@@ -118,7 +130,8 @@ node src/cli.js diag            # extension version, id, connection, recent erro
 | `extension_not_connected` | The extension is not loaded, or is loaded in a different browser profile. |
 | `permission_denied` | That site was never granted. Step 3. |
 | `permission_not_granted` | The `session` tool needs the optional `cookies` permission. |
-| `tab_unresponsive` | That tab's renderer is frozen. Open the tab once, or use another. |
+| `token_required` | The bridge is running but the extension has no token. Paste the token into the popup (step 5). |
+| `tab_unresponsive` | That tab's renderer is frozen. Run `activate` then retry, or use `--auto-activate`. |
 | Everything times out | Check `node src/cli.js diag` — most often the wrong browser or a dead extension. |
 
 ## What is where
@@ -130,6 +143,7 @@ node src/cli.js diag            # extension version, id, connection, recent erro
 | `src/mcp.js` | the MCP server — this is what your agent talks to |
 | `src/client.js` | client library, if you would rather call the bridge from your own code |
 | `src/cli.js` | the same thing from the command line |
+| `scripts/` | Windows helpers: autostart at logon, start/restart the bridge |
 | `test/` | see [README](../README.md#testing) for which need a browser |
 
 ---

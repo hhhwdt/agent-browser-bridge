@@ -801,19 +801,42 @@ export async function waitInPage(opts) {
   const deadline = Date.now() + timeoutMs;
   const started = Date.now();
 
+  // idle 条件：记录上次资源数量变化的时间
+  let lastResourceCount = -1;
+  let lastResourceChange = Date.now();
+
   const satisfied = () => {
+    // selector 条件
     if (opts.selector) {
       const el = document.querySelector(opts.selector);
       if (!el) { return false; }
       const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
       // 只在要求"出现"时校验可见性，避免隐藏元素永远等不到
       if (state === 'appear' && r && (r.width <= 0 || r.height <= 0)) { return false; }
-      return true;
     }
+    // text 条件
     if (opts.text) {
-      return !!document.body && (document.body.innerText || '').includes(opts.text);
+      if (!document.body || !(document.body.innerText || '').includes(opts.text)) { return false; }
     }
-    return false;
+    // url 条件
+    if (opts.url) {
+      if (!location.href.includes(opts.url)) { return false; }
+    }
+    // count 条件（需要 selector）
+    if (opts.count) {
+      if (!opts.selector) { return false; }
+      if (document.querySelectorAll(opts.selector).length < opts.count) { return false; }
+    }
+    // idle 条件：资源数量在 idleMs 内没有变化
+    if (opts.idleMs) {
+      const entries = performance.getEntriesByType('resource').length;
+      if (entries !== lastResourceCount) {
+        lastResourceCount = entries;
+        lastResourceChange = Date.now();
+      }
+      if (Date.now() - lastResourceChange < opts.idleMs) { return false; }
+    }
+    return true;
   };
 
   for (;;) {
@@ -1326,6 +1349,81 @@ export function rectInPage(selector) {
     height: r.height,
     scale: 1
   };
+}
+
+/**
+ * 页面侧：把 HTML 元素转成 Markdown。
+ * 自包含：标题、段落、列表（一层嵌套）、链接、图片、行内代码、代码块、引用、表格。
+ */
+export function markdownInPage(el) {
+  if (!el) { return { ok: false, error: 'element_not_found' }; }
+
+  const inline = (node) => {
+    if (node.nodeType === 3) { return node.textContent; }
+    if (node.nodeType !== 1) { return ''; }
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'code') { return '`' + node.textContent + '`'; }
+    if (tag === 'strong' || tag === 'b') { return '**' + Array.from(node.childNodes).map(inline).join('') + '**'; }
+    if (tag === 'em' || tag === 'i') { return '*' + Array.from(node.childNodes).map(inline).join('') + '*'; }
+    if (tag === 'a') {
+      const text = Array.from(node.childNodes).map(inline).join('');
+      const href = node.getAttribute('href') || '';
+      return '[' + text + '](' + href + ')';
+    }
+    if (tag === 'img') {
+      const src = node.getAttribute('src') || '';
+      const alt = node.getAttribute('alt') || '';
+      return '![' + alt + '](' + src + ')';
+    }
+    if (tag === 'br') { return '\n'; }
+    return Array.from(node.childNodes).map(inline).join('');
+  };
+
+  const blocks = (node, depth) => {
+    const lines = [];
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) {
+        const text = child.textContent.trim();
+        if (text) { lines.push(text); }
+        continue;
+      }
+      if (child.nodeType !== 1) { continue; }
+      const tag = child.tagName.toLowerCase();
+      if (/^h[1-6]$/.test(tag)) {
+        const level = parseInt(tag[1], 10);
+        lines.push('#'.repeat(level) + ' ' + inline(child).trim());
+      } else if (tag === 'p') {
+        lines.push(inline(child).trim());
+      } else if (tag === 'ul' || tag === 'ol') {
+        const items = Array.from(child.children).filter((li) => li.tagName.toLowerCase() === 'li');
+        items.forEach((li, i) => {
+          const marker = tag === 'ol' ? (i + 1) + '.' : '-';
+          lines.push('  '.repeat(depth) + marker + ' ' + inline(li).trim());
+        });
+      } else if (tag === 'blockquote') {
+        const inner = blocks(child, depth).join('\n');
+        lines.push(inner.split('\n').map((l) => '> ' + l).join('\n'));
+      } else if (tag === 'pre') {
+        lines.push('```');
+        lines.push(child.textContent);
+        lines.push('```');
+      } else if (tag === 'table') {
+        const rows = Array.from(child.querySelectorAll('tr'));
+        rows.forEach((row, ri) => {
+          const cells = Array.from(row.querySelectorAll('th,td')).map((c) => inline(c).trim());
+          lines.push('| ' + cells.join(' | ') + ' |');
+          if (ri === 0) { lines.push('| ' + cells.map(() => '---').join(' | ') + ' |'); }
+        });
+      } else {
+        const text = inline(child).trim();
+        if (text) { lines.push(text); }
+      }
+    }
+    return lines;
+  };
+
+  const markdown = blocks(el, 0).join('\n\n').trim();
+  return { ok: true, markdown, charCount: markdown.length };
 }
 
 /* 供其他模块使用 */

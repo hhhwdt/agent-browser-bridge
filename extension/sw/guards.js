@@ -33,7 +33,9 @@ export function tabUnresponsive(err, tabId) {
     tabId,
     message: msg,
     hint: isTimeout
-      ? '该标签页的渲染进程无响应（可能已休眠或卡死）。可在浏览器里点开该标签页唤醒，或换一个标签页。'
+      ? '该标签页的渲染进程无响应（可能已休眠或卡死）。'
+        + '下一步：先调 activate 唤醒标签页，再重试原动作。'
+        + '若仍失败，在浏览器里点开该标签页唤醒，或换一个标签页。'
       : undefined
   };
 }

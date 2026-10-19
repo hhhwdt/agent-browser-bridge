@@ -32,6 +32,15 @@ const SUITES = [
   ['发布包里没有本机专用文件', path.join('..', 'tools', 'check-package.js')],
   ['两处版本号一致', path.join('..', 'tools', 'check-version.js')],
   ['动作失败时不报成功', 'test-result-semantics.js'],
+  ['弹窗 i18n key 与 locale 文件一致', 'test-i18n-keys.js'],
+  ['wait 条件成立与超时', 'test-wait.js'],
+  ['审计日志不泄露页面内容', 'test-audit.js'],
+  ['共享 token 校验', 'test-token.js'],
+  ['更新检查版本比较', 'test-update.js'],
+  ['Markdown 转换', 'test-markdown.js'],
+  ['冻结标签页恢复提示', 'test-frozen-tab.js'],
+  ['批量动作', 'test-batch.js'],
+  ['Per-tab lease', 'test-lease.js'],
   ['MCP 协议（自己充当客户端）', 'test-mcp.js']
 ];
 

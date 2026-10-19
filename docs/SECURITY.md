@@ -21,30 +21,18 @@ sandbox, and it does not try to protect you from software you chose to run.
 | A site that has not been granted | The extension checks the origin against the browser's permission store before every injection. Access is denied until you grant it in the popup. |
 | Silent operation | Actions mark the tab (badge, favicon dot, title prefix) and show an in-page indicator. There is no unmarked mode. |
 | Result spoofing between browsers | `/result` rejects a reply from a browser other than the one the task was sent to. |
-| An extension that has not asked for host access to the bridge | Such a request is cross-origin, so Chrome attaches an `Origin` of `chrome-extension://<id>`; the server checks that ID against an allowlist and answers 403. This is a speed bump, not a wall — see below. |
+| An extension that has not asked for host access to the bridge | Such a request is cross-origin, so Chrome attaches an `Origin` of `chrome-extension://<id>`; the server checks that ID against an allowlist and answers 403. |
+| A second extension that declares host access to `127.0.0.1:18777` | The bridge generates a shared token on first start and requires `X-ABB-Token` on every route. The real extension reads the token from `chrome.storage.local` (pasted in the popup once). A second extension cannot read the token file, so it cannot drive the bridge. |
 
 **Not defended against**
 
-- **Any process running as you.** The bridge has no authentication. A local process can poll
-  `/poll`, receive tasks, and call every action. This is by design: a same-user process can read
-  your browser profile and its cookies directly anyway, so a token would add friction without
-  adding protection. Treat "can run code on this machine as this user" as the trust boundary.
-- **Anything that can omit `Origin`.** Requests without an `Origin` header are accepted, because
-  that is how local scripts talk to the bridge. Two consequences worth knowing:
-  - A page you visit can reach `/health`, trigger a `/tabs` dispatch, and — because `/poll` cannot
-    tell callers apart either — hold the poll slot so the next task is delivered to that connection
-    instead of the extension. The task cannot be read, but it is consumed and the caller waits for a
-    timeout.
-  - **An extension that declares host access to `127.0.0.1:18777` looks exactly like the real one**,
-    because its fetches stop being CORS requests and Chrome omits `Origin`. It can then drive every
-    action, borrowing this extension's `cookies` and `debugger` permissions without ever being
-    granted them.
-
-  This is the honest limit of the design: over loopback HTTP, caller identity cannot be established
-  without a shared secret, and the extension cannot be given one automatically because extensions
-  cannot read files. A token pasted into an options page once would close it; so would moving the
-  extension-to-bridge leg onto native messaging, where the browser itself vouches for the extension
-  ID. Neither is implemented.
+- **Any process running as you.** The shared token closes the "another extension" hole, but a
+  local process running as the same user can read the token file from disk. Treat "can run code
+  on this machine as this user" as the trust boundary — the token raises the bar from "any
+  extension" to "any process that can read your config directory".
+- **A web page you visit.** Pages cannot read the token file. They can still reach `/health`
+  and trigger a `/tabs` dispatch, but they cannot poll for tasks or call any action because
+  they cannot send `X-ABB-Token`.
 - **The user.** Nobody is protected from the operator of the machine.
 
 ## Sharp edges

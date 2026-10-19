@@ -78,7 +78,7 @@ One note for older notes and habits: the CLI used to be `read.js` in the reposit
 
 | Module | Holds | Imports from |
 |---|---|---|
-| `injected.js` | the 14 functions that get serialised into a page | **nothing** |
+| `injected.js` | the 15 functions that get serialised into a page | **nothing** |
 | `guards.js` | timeouts, frame selection, tab resolution, permission checks | nothing |
 | `config.js` | bridge URL, poll timings, browser identity | nothing |
 | `marks.js` | the visible "an agent touched this tab" state | injected, config, guards |
@@ -151,9 +151,10 @@ type and key probe read-only first, then act in the one frame that matched.
 
 **The extension's requests to the bridge carry no `Origin`.** It holds host permission for
 `127.0.0.1:18777`, so its fetches are not CORS requests and Chrome omits the header entirely.
-Consequences: the server cannot tell the real extension from any other local program, and requiring
-an extension origin on `/poll` locks the real extension out. See [SECURITY.md](SECURITY.md) for what
-that means for the trust boundary.
+The bridge requires `X-ABB-Token` on every route except `/health`; the extension reads the token
+from `chrome.storage.local` (pasted in the popup once) and sends it on every poll and result.
+A second extension cannot read the token file, so it cannot drive the bridge. See
+[SECURITY.md](SECURITY.md) for the trust boundary.
 
 **Editing the extension requires a reload, and `src/cli.js reload` needs the extension to be alive.**
 That combination is a deadlock: deploy a broken service worker and the only way back is a human

@@ -284,6 +284,12 @@ node src/cli.js eval       --match "example.com" --code "document.title"
 node src/cli.js screenshot --match "example.com" --out shot.png --selector "table"
 node src/cli.js session    --match "example.com" --name SESSION
 node src/cli.js upload     --match "example.com" --file /path/to/report.pdf
+
+# bridge management
+node src/cli.js token          # show token file path
+node src/cli.js token --show   # print the token
+node src/cli.js log            # show last 50 audit log lines
+node src/cli.js batch steps.json  # execute a batch of actions
 ```
 
 `--dryRun` reports what a click *would* hit without clicking, which is useful in automated flows:
@@ -314,6 +320,48 @@ await ab.grab({ match: 'example.com/watch', url: media.videos[0].src, filename: 
 ```
 
 Failures throw `BridgeError` with a `code`; an unreachable bridge throws `BridgeUnavailableError`.
+
+### New in 1.8.0
+
+**Shared token.** The bridge generates a token on first start. Paste it into the extension popup
+once. A second extension cannot read the token file, so it cannot drive the bridge.
+
+**Batch actions.** Execute an ordered list of actions in one call:
+
+```js
+await ab.batch([
+  { action: 'read', match: 'example.com' },
+  { action: 'click', match: 'example.com', selector: '#next' },
+  { action: 'wait', match: 'example.com', selector: '#loaded' }
+]);
+```
+
+**Per-tab lease.** Prevent two agents from operating the same tab simultaneously:
+
+```js
+await ab.read({ match: 'example.com', lease: true });
+```
+
+**Auto-activate.** Wake a frozen tab and retry automatically:
+
+```js
+await ab.read({ match: 'example.com', autoActivate: true });
+```
+
+**Markdown output.** Get structured Markdown instead of plain text:
+
+```js
+const page = await ab.read({ match: 'example.com', format: 'markdown' });
+console.log(page.markdown);
+```
+
+**Wait for URL, count, or network idle:**
+
+```js
+await ab.wait({ match: 'example.com', url: '/dashboard' });
+await ab.wait({ match: 'example.com', selector: '.item', count: 5 });
+await ab.wait({ match: 'example.com', idleMs: 2000 });
+```
 
 ### HTTP
 
@@ -418,6 +466,10 @@ Two details that cost real debugging time, in case you touch this code:
   half-mark. Cleanup therefore discovers marked tabs by **either** the title prefix or the tab's
   `favIconUrl`, not the title alone.
 
+Beyond the visible marks, the bridge writes every dispatched action to an audit log (`audit.jsonl`),
+recording timestamp, action, target, outcome, and duration. The log records action metadata only —
+never page content. Read it with `node src/cli.js log`.
+
 ## Pages that fight back
 
 Real sites are messier than test pages. These are handled, and each one was added because it broke
@@ -429,7 +481,7 @@ something in practice:
 | **Editor using `designMode`** | `designMode` is detected and the frame's body used as the target, since no element carries `contenteditable` |
 | **Editor only mounts when visible** | reported honestly; `activate` brings the tab forward to wake it |
 | **Buttons bound to `mousedown`** | a full pointer/mouse event sequence is dispatched, not just `.click()` |
-| **Frozen background tab** | every injection is wrapped in a timeout, so it fails fast with `tab_unresponsive` instead of hanging the task |
+| **Frozen background tab** | every injection is wrapped in a timeout, so it fails fast with `tab_unresponsive` instead of hanging the task. The error names the next step: `activate` then retry, or use `--auto-activate` |
 | **Site checks `Referer` / blocks CORS** | `grab` (see above) |
 | **Chrome and Edge both open** | one queue per browser; the extension rejects tasks addressed elsewhere; unspecified requests try each browser until the tab is found |
 
@@ -447,9 +499,10 @@ something in practice:
 - The server rejects extension origins whose ID is not on its allowlist, so an extension that has
   not asked for host access to the bridge gets a 403 rather than control of your browser. The
   manifest carries a public key, which is what makes that ID identical across source installs.
-  This is a speed bump: anything that sends no `Origin` header looks like the real extension, and
-  that includes any extension which *does* declare host access to `127.0.0.1:18777`. See
-  [SECURITY.md](docs/SECURITY.md) for why a real boundary needs a shared secret.
+- The bridge requires `X-ABB-Token` on every route except `/health`. The extension reads the token
+  from `chrome.storage.local` (pasted in the popup once). A second extension cannot read the token
+  file, so it cannot drive the bridge. A same-user process can read the token from disk. See
+  [SECURITY.md](docs/SECURITY.md) for the trust boundary.
 - Privileged capabilities are separated: `cookies` is opt-in and off until granted from the popup;
   `debugger`-backed actions are declared required only because Chrome forbids the alternative.
 - Read operations have no side effects. Write operations are risk-classified, and the caller is told
@@ -464,11 +517,10 @@ something in practice:
   debugger is detached as soon as the call ends.
 
 Because `eval`, `session` and `download` are powerful primitives, treat anything that can reach the
-local bridge — any local process — as able to use them once granted. Keep port 18777 on loopback.
+local bridge and read the token file as able to use them once granted. Keep port 18777 on loopback.
 
-What is deliberately *outside* this model (other browser extensions, headerless requests, the user
-themselves) is listed in [SECURITY.md](docs/SECURITY.md). Do not read the summary above as a stronger
-claim than the one written there.
+What is deliberately *outside* this model (same-user processes, the user themselves) is listed in
+[SECURITY.md](docs/SECURITY.md). Do not read the summary above as a stronger claim than the one written there.
 
 ## Testing
 
@@ -491,11 +543,20 @@ node test/test-offline.js        # all of the suites below, then a summary
 | `test-allowlist.js` | which origins may drive the bridge, and that the manifest key derives the allowlisted ID |
 | `test-sw-load.js` | the service-worker module graph loads at all, boots exactly once, and still exports what it used to — in a browser a load-time failure only shows up as "the extension stopped responding" |
 | `test-result-semantics.js` | an action that could not do its job reports `ok: false` rather than success — the failure mode that leaves the caller with no reason to look again |
+| `test-i18n-keys.js` | every i18n key used by the popup and the manifest exists in both locale files — a missing key renders as an empty string, which is silent |
+| `test-wait.js` | each wait condition (selector, text, url, count, idle) returns ok when satisfied and `wait_timeout` when not — the failure mode that means "the next step ran before the page was ready" |
+| `test-audit.js` | the audit log records actions but never page content — a log that leaks what someone read is worse than no log |
 | `check-inject-scope.js` | an injected function only carries its own source, so referencing a module-level helper compiles and then throws at runtime |
 | `check-extension-id.js` | the ID claim above, on its own — drift here has no visible symptom |
 | `check-version.js` | `package.json` and the manifest carry the same version, so `diag` and the registry cannot disagree about what is installed |
 | `check-package.js` | nothing untracked reaches the npm tarball; `npm pack` includes `README*` regardless of `.gitignore`, which is how a local ops document almost shipped |
 | `test-mcp.js` | the MCP protocol, spoken directly rather than through an SDK |
+| `test-token.js` | token is generated, required, and validated — the failure mode where a missing token lets any local program drive the bridge |
+| `test-update.js` | version comparison logic — the failure mode where a user sees a wrong update prompt or no prompt when one is needed |
+| `test-markdown.js` | HTML to Markdown conversion — the failure mode where structure is lost or page content is dumped raw |
+| `test-frozen-tab.js` | the hint names the next step — the failure mode where a user doesn't know to activate before retrying |
+| `test-batch.js` | batch execution order and stop-on-failure — the failure mode where a batch bypasses the risk rails or runs steps out of order |
+| `test-lease.js` | lease acquisition and release — the failure mode where two agents interleave on the same tab with no ordering guarantee |
 
 `test-mcp.js` skips its live section when `ABB_MCP_OFFLINE=1` is set, which is what CI uses. The same
 suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22) — Windows is this tool's main
@@ -594,6 +655,11 @@ Two things worth knowing as a contributor:
   and hardware secure path; obtaining them means defeating the protection itself, which this project
   does not do.
 - Not affiliated with any browser vendor; uses only documented extension APIs.
+- The shared token protects against other extensions, but a local process running as the same user
+  can read the token file from disk. Do not run the bridge on a shared or compromised machine.
+- Batch actions are not transactional: if step 3 fails, steps 1-2 are already committed. Use
+  `continueOnError: true` only when later steps do not depend on earlier ones.
+- Per-tab leases expire after 5 minutes. A crashed caller's lease will block others until it expires.
 
 ## Contributing
 

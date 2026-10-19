@@ -95,7 +95,36 @@ async function checkBridge() {
 }
 
 /* ------------------------------------------------------------------ *
- * 3. 浏览器扩展
+ * 3. 共享 token
+ * ------------------------------------------------------------------ */
+function checkToken() {
+  // 与 server.js 相同的配置目录逻辑
+  const configDir = (() => {
+    if (process.platform === 'win32') {
+      const base = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming');
+      return path.join(base, 'agent-browser-bridge');
+    }
+    return path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '', '.config'), 'agent-browser-bridge');
+  })();
+
+  const tokenFile = path.join(configDir, 'token');
+  try {
+    const token = fs.readFileSync(tokenFile, 'utf8').trim();
+    if (token) {
+      layer('共享 token', 'ok', tokenFile);
+      return token;
+    }
+  } catch (e) {
+    // 文件不存在
+  }
+
+  layer('共享 token', 'todo', '未找到 token 文件',
+    `桥接服务首次启动时会生成 token。请运行 node src/server.js 启动服务，然后把 token 粘贴到扩展弹窗。`);
+  return null;
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. 浏览器扩展
  * ------------------------------------------------------------------ */
 async function checkExtension(health) {
   if (!health) {
@@ -293,6 +322,7 @@ function checkMcp() {
 
   if (nodeOk) {
     health = await checkBridge();
+    checkToken();
     info = await checkExtension(health);
   }
 

@@ -25,6 +25,9 @@ const BROWSER_NAME = (() => {
   return 'unknown';
 })();
 
+/** 扩展向桥接证明自己身份的请求头名。 */
+const TOKEN_HEADER = 'X-ABB-Token';
+
 /* 供其他模块使用 */
-export { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS };
+export { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER };
 

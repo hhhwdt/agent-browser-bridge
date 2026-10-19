@@ -27,7 +27,7 @@ const SW_DIR = path.join(__dirname, '..', 'extension', 'sw');
 const INJECTED = [
   'extractInPage', 'clickInPage', 'linksInPage', 'typeInPage', 'keyInPage',
   'indicatorInPage', 'diagInPage', 'waitInPage', 'tabMarkInPage', 'mediaInPage',
-  'readStorageInPage', 'evalInPage', 'rectInPage', 'fetchInPage'
+  'readStorageInPage', 'evalInPage', 'rectInPage', 'fetchInPage', 'markdownInPage'
 ];
 
 const files = fs.readdirSync(SW_DIR).filter((f) => f.endsWith('.js')).sort();
