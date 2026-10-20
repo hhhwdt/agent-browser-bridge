@@ -45,6 +45,13 @@ function logAudit(entry) {
       // 文件不存在，无需轮转
     }
 
+    // 目录可能不存在（--log-file 自定义路径、新机器首次使用）——appendFile 不会自动建
+    try {
+      fs.mkdirSync(path.dirname(AUDIT_LOG_FILE), { recursive: true });
+    } catch (e) {
+      // 已存在则忽略
+    }
+
     fs.appendFileSync(AUDIT_LOG_FILE, line, 'utf8');
   } catch (e) {
     console.error('[audit] 写入失败:', e.message);

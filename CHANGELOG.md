@@ -8,7 +8,7 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
-## [Unreleased]
+## [1.8.0] - 2026-10-20
 
 ### Added
 
@@ -41,6 +41,13 @@ reconstructing them from the code alone would be guesswork.
 - The extension popup is localised: `default_locale` plus `_locales/en` and `_locales/zh_CN`, no string hard-coded in `popup.html` or `popup.js`.
 - `diag`'s `markedCount` now comes from `collectMarkedTabs()` (live detection by title prefix and badge) instead of `markedTabs.size` (historical records), so the popup shows the number of tabs that actually carry a mark right now.
 - `unmarkTask` now checks whether a specific tab is actually marked before injecting, and updates `markedTabs` after clearing so storage stays consistent with reality.
+- `src/server.js`, `src/cli.js` and `src/mcp.js` became thin entry shims whose implementations live in `src/server/`, `src/cli/` and `src/mcp/`; the extension's `sw/injected.js` split into six `inject-*.js` modules and `sw/actions.js` into six `actions-*.js` modules, with `actions.js` re-exporting them so `background.js` keeps one import path. Bin paths and test spawn paths are unchanged. The helpers duplicated between the server and the CLI now live in `src/version.js` and `src/config-dir.js`.
+
+### Fixed
+
+- The CLI update check never ran: it required `./package.json` from `src/`, where no package.json exists, so no version was ever compared or printed.
+- The audit log silently failed on a machine without the config directory (custom `--log-file` paths, first run on a new machine); the directory is now created before appending.
+- The `browser-tests` CI job has been red since it was added, so it never actually verified anything: the bridge required a token that a fresh-profile extension cannot have, and setup-chrome@v1 installed branded Chrome, which ignores `--load-extension` since Chrome 137. The job now starts the bridge with `--no-token` on the disposable runner and pins Chrome for Testing via setup-chrome@v2.
 
 ## [1.7.1] - 2026-10-16
 
