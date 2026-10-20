@@ -11,6 +11,11 @@ background tabs**, while you keep working in another window.
 
 [简体中文](README.zh-CN.md) · English · [Quickstart](docs/QUICKSTART.md)
 
+<p>
+  <img src="docs/demo.png" width="720" alt="Agent bridge drives a background tab: reads a page, types a keyword, clicks search, marks a ticket done — each step shows the real CLI command">
+</p>
+
+
 ---
 
 > **Read this before you install.** Once the bridge is running, any program on this machine that
@@ -610,18 +615,18 @@ They create and close their own tabs and leave your active tab untouched.
 
 ```
 src/                     the Node side
-  server.js              the local bridge — no dependencies, no build step
+  server.js              the local bridge — implementation in src/server/
   client.js              client library (`main` in package.json), for calling the bridge yourself
-  cli.js                 the same capabilities from the command line
-  mcp.js                 the MCP server your agent talks to
+  cli.js                 the same capabilities from the command line — implementation in src/cli/
+  mcp.js                 the MCP server your agent talks to — implementation in src/mcp/
   setup.js               one-command self-check: which layer is missing, what to do about it
 extension/               the browser extension (MV3)
   manifest.json          permissions, entry point, public key
   popup.html/.js         status, site grants, opt-in permissions, clear marks
   sw/                    the service worker, split by responsibility
     background.js        poll loop, task dispatch, boot, listeners
-    actions.js           one function per action
-    injected.js          the functions that get serialised into a page
+    actions.js           one function per action, grouped into actions-*.js files
+    inject-*.js          the functions that get serialised into a page
     marks.js             the visible "an agent touched this tab" state
     guards.js            injection timeouts, frame choice, permission checks
     config.js            bridge URL, poll timings, browser identity
@@ -640,10 +645,10 @@ path.
 Two things to know before you touch the code:
 
 - The extension's service worker is the only part that touches a page, and its
-  `sw/injected.js` is special: those functions are serialised into the page, so each one has to be
-  self-contained. `tools/check-inject-scope.js` enforces that, and `docs/ARCHITECTURE.md` explains
-  why it matters.
-- The bridge handles every HTTP route through a table near the bottom of `src/server.js`, one small
+  `sw/inject-*.js` modules are special: those functions are serialised into the page, so each one has
+  to be self-contained. `tools/check-inject-scope.js` enforces that, and `docs/ARCHITECTURE.md`
+  explains why it matters.
+- The bridge handles every HTTP route through a table in `src/server/index.js`, one small
   function per route. Adding an endpoint means adding a line there.
 
 ## Limitations

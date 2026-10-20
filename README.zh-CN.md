@@ -9,6 +9,11 @@
 
 简体中文 · [English](README.md) · [快速开始](docs/QUICKSTART.zh-CN.md)
 
+<p>
+  <img src="docs/demo.png" width="720" alt="agent 后台操控真实页面：读页面、输入关键字、点击查询、标记工单完成，每一步显示实际执行的 CLI 命令">
+</p>
+
+
 ---
 
 > **装之前先读这一段。** 桥接服务一旦跑起来，本机上任何能访问它端口并能读取 token 文件的程序，
@@ -589,10 +594,10 @@ node test/test-editor.js         # 富文本编辑器链路（会进入编辑态
 
 ```
 src/                     Node 这一侧
-  server.js              本地桥接服务（零依赖、无构建步骤）
+  server.js              本地桥接服务（零依赖、无构建步骤），实现拆在 src/server/
   client.js              客户端库（package.json 的 main），想自己写代码调桥接时用
-  cli.js                 同样的能力，命令行形态
-  mcp.js                 MCP 服务：agent 直接对接的就是它
+  cli.js                 同样的能力，命令行形态，实现拆在 src/cli/
+  mcp.js                 MCP 服务：agent 直接对接的就是它，实现拆在 src/mcp/
   setup.js               一条命令自检：缺哪一层、下一步做什么
 extension/               MV3 扩展（Chrome + Edge 通用）
   manifest.json          权限、入口、公钥
@@ -600,8 +605,8 @@ extension/               MV3 扩展（Chrome + Edge 通用）
   _locales/               i18n 文案（en + zh_CN）
   sw/                    service worker，按职责拆分
     background.js        轮询、任务分派、启动、事件监听
-    actions.js           一个动作一个函数
-    injected.js          注入到页面里执行的函数
+    actions.js           一个动作一个函数，按主题放进 actions-*.js
+    inject-*.js          注入到页面里执行的函数
     marks.js             页面上可见的「被 agent 动过」标记
     guards.js            注入超时、框架选择、权限检查
     config.js            桥接地址、轮询参数、浏览器标识
@@ -618,8 +623,8 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 
 改代码前要知道的两件事：
 
-- 扩展的 service worker 是唯一碰页面的部分，其中 `sw/injected.js` 特殊：那些函数会被**序列化**送进页面，所以每个都必须自包含。`tools/check-inject-scope.js` 守这条，原因见 `docs/ARCHITECTURE.md`。
-- 桥接的全部 HTTP 路由集中在 `src/server.js` 末尾的路由表里，一个路由一个小函数；加接口就是加一行。
+- 扩展的 service worker 是唯一碰页面的部分，其中 `sw/inject-*.js` 特殊：那些函数会被**序列化**送进页面，所以每个都必须自包含。`tools/check-inject-scope.js` 守这条，原因见 `docs/ARCHITECTURE.md`。
+- 桥接的全部 HTTP 路由集中在 `src/server/index.js` 的路由表里，一个路由一个小函数；加接口就是加一行。
 
 ## 已知限制
 
