@@ -25,13 +25,14 @@ const DEFAULT_ORIGINS = [
 // 高级能力所需的可选权限。默认不授予，避免安装时索取过宽权限。
 //
 // 注意：只列清单里真正声明为 optional_permissions 的权限。
-// Chrome 禁止 debugger 作为可选权限（"Permission 'debugger' cannot be listed
-// as optional"），它只能是必需权限，因此不在这里申请——请求未声明的权限会抛
-// "Only permissions specified in the manifest may be requested"。
-const ADV_PERMISSIONS = ['cookies'];
+// debugger 允许作为可选权限（permissions API 文档的
+// “Declare optional permissions”表里列有它），未授予时 upload / grab /
+// screenshot 返回 advanced_not_granted，弹窗里点一次“授予”即可。
+const ADV_PERMISSIONS = ['cookies', 'debugger'];
 // 值是 i18n key，不是显示文本
 const ADV_LABELS = {
-  cookies: 'permCookies'
+  cookies: 'permCookies',
+  debugger: 'permDebugger'
 };
 
 const bridgeDot = document.getElementById('bridgeDot');

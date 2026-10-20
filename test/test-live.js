@@ -146,9 +146,16 @@ function startFileServer() {
     const ret = await ab.evalPage({ tabId, code: 'return document.title' });
     check('return 风格取到值', ret.value === expr.value, ret.value);
 
-    console.log('\n[9] screenshot：整页截图走 CDP');
-    const shot = await ab.screenshot({ tabId, full: true });
-    check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { via: shot.via });
+    console.log('\n[9] screenshot');
+    let shot = await ab.screenshot({ tabId, full: true });
+    if (shot && shot.error === 'advanced_not_granted') {
+      // debugger 从 1.9.0 起是可选权限，全新 profile 没人点过弹窗授予。
+      // 前台可视区域截图走退避（自带截屏），不需要 debugger，照样验动作链路；
+      // 整页截图等授予后的本地环境再验。
+      console.log('     debugger 未授予：改验前台可视区域（退避路径），整页截图留给已授予的环境');
+      shot = await ab.screenshot({ tabId });
+    }
+    check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { error: shot.error, via: shot.via });
 
     console.log('\n[10] download：2MB 文件（结果体约 2.7MB，旧版 1MB 上限会掐断连接）');
     const port = await startFileServer();

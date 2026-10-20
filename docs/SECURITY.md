@@ -48,13 +48,15 @@ about before granting anything:
   browser's download stack.
 - `grab` attaches the debugger and injects a permissive CORS header for one origin for the duration
   of a single call, then detaches.
-- `debugger`-backed actions (screenshot, upload, grab) conflict with DevTools on the same tab.
+- Debugger-backed actions (screenshot, upload, grab) conflict with DevTools on the same tab. The
+  `debugger` permission is optional: nothing attaches until you grant it in the popup, and those
+  three actions decline with a clear message before that.
 
 ## Keeping a deployment safe
 
 - Leave the port on loopback. Do not expose it to a network.
 - Grant site access per site, and revoke when you are done.
-- Leave the `cookies` permission off unless you need it.
+- Leave the `cookies` and `debugger` permissions off unless you need them.
 - Stop the bridge when you are not using it.
 
 ## The extension allowlist, and what it is worth

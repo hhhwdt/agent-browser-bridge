@@ -10,7 +10,6 @@
     "scripting",
     "storage",
     "alarms",
-    "debugger",
     "downloads"
   ],
   "host_permissions": [
@@ -18,7 +17,8 @@
     "http://localhost:18777/*"
   ],
   "optional_permissions": [
-    "cookies"
+    "cookies",
+    "debugger"
   ],
   "optional_host_permissions": [
     "*://*/*"

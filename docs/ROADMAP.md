@@ -322,9 +322,11 @@ expiry.
 
 - **Writing cookies or web storage.** The tool exists because the user is *already* logged in. Writing
   credentials in is a different product with a much worse failure mode.
-- **A store listing.** The README argues it: `debugger` plus executing code a local program supplies at
-  run time is what store review treats as remote code execution. Loading unpacked is the supported
-  path, and the manifest `key` keeps the extension ID identical across installs.
+- **A Chrome Web Store listing.** The README argues it: executing code a local program supplies at
+  run time plus site access is what store review treats as remote code execution. Loading unpacked
+  is the supported path, and the manifest `key` keeps the extension ID identical across installs.
+  Edge Add-ons is a separate, planned route (free, and `debugger` being optional since 1.9.0 makes
+  the permission story workable); see `docs/STORE.md`.
 - **Firefox.** MV3 differs enough (event pages rather than service workers, `moz-extension://` IDs)
   that the support cost is real and the audience is small. The docs say it is untested; leave it that
   way.

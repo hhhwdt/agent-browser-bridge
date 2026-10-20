@@ -55,7 +55,7 @@ only while a request is in flight.
 | `scripting` | inject the read/click/type functions into that tab |
 | `storage` | the mark list and error log above |
 | `alarms` | keep the service worker polling after the browser suspends it |
-| `debugger` | screenshots, putting files into an upload control, and fetching media that blocks CORS |
+| `debugger` (optional, off by default) | screenshots, putting files into an upload control, and fetching media that blocks CORS |
 | `downloads` | saving files through the browser's download stack |
 | `cookies` (optional, off by default) | the `session` action |
 | host permission for `127.0.0.1:18777` | talking to the local bridge |

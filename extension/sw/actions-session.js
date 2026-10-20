@@ -17,9 +17,8 @@ function truncate(value, max) {
 /**
  * 检查可选权限是否已授予。
  *
- * 只有 cookies 是可选权限（安装时不索取，由用户在扩展弹窗中按需授予）。
- * debugger 不是可选的 —— Chrome 明确禁止其出现在 optional_permissions 中，
- * 因此它只能作为必需权限，无需也无法在运行时申请。
+ * cookies 与 debugger 都是可选权限（安装时不索取，由用户在扩展弹窗中按需授予）。
+ * 返回未授予的权限名列表。
  */
 async function requireOptionalPermissions(names) {
   const needed = [];

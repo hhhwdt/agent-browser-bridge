@@ -226,3 +226,26 @@ export async function ensureInjectable(tab) {
 /* 供其他模块使用 */
 export { INJECT_TIMEOUT_MS };
 
+/**
+ * 上传、抓取、截图三类动作依赖 chrome.debugger（DevTools 协议通道）。
+ * debugger 在清单里是可选权限，默认不授予：安装时不索取高危权限，
+ * 审核与安装页面都轻一些；代价是第一次使用相关动作要到弹窗里点一次授权。
+ * 返回 null 表示已授予（或环境里没有权限 API，无从确认，保持旧行为），
+ * 否则返回一个可直接作为动作结果的失败对象。
+ */
+
+export async function advancedNotGranted() {
+  try {
+    const granted = await chrome.permissions.contains({ permissions: ['debugger'] });
+    if (granted) { return null; }
+  } catch (e) {
+    return null;
+  }
+  return {
+    ok: false,
+    error: 'advanced_not_granted',
+    hint: '该动作要用 Chrome 调试协议（可选权限，默认关闭）。'
+      + '在扩展弹窗的“可选权限”区点一次“授予”即可，授予后不再询问。'
+  };
+}
+

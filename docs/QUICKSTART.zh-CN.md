@@ -38,9 +38,12 @@ node src/setup.js
 
 加载后工具栏会出现一个拼图图标，可以固定出来。
 
-> 没有商店版本，也不会有：这工具需要 `debugger` 权限、会执行本机程序在运行时传入的代码、还要
-> 求站点访问权限。这几条放在一起会被商店审核判为远程代码执行与远程控制。加载已解压是唯一
-> 受支持的安装方式。
+> Edge 可以免手动加载：跑 `node src/setup.js --install`，桌面会生成一个带
+> `--load-extension` 参数的快捷方式，从这个入口启动的 Edge 自带扩展（用的是你原来的 profile）；
+> 条件只有一个：Edge 已在运行时它不生效，先全部退出再进。Chrome 只能用上面的手动方式。
+>
+> Chrome Web Store 不上架，evaluate 运行时代码和站点访问这两条审核过不去；Edge Add-ons 是
+> 免费上架的计划（材料在 `docs/STORE.md`）。加载已解压在两端都不受信任限制。
 
 ## 4. 授权你要它操作的站点
 
@@ -49,7 +52,9 @@ node src/setup.js
 - 填一个主机名（例如 `confluence.example.com`）后点**授权**，或者
 - 直接点**授权所有站点**，省得一个个加。
 
-可选：需要用 `session` 工具（读 Cookie 和站点存储）时，在"可选权限"那一行点**授予**。不需要就别给。
+可选：需要在弹窗「可选权限」里点**授予**的有两项——`cookies`（session 工具，读 Cookie 和站点
+存储）和 `debugger`（upload、grab、以及后台/整页/跨框架元素截图）。首次用到对应动作时会得到
+`advanced_not_granted` 提示，回来点一下就行；都不用就都别给。
 
 ## 5. 粘贴桥接 token
 
@@ -119,6 +124,7 @@ node src/cli.js diag            # 扩展版本、id、连接状态、最近错�
 | `extension_not_connected` | 扩展没加载，或加载在另一个浏览器配置里。 |
 | `permission_denied` | 该站点从没授权过。回到第 3 步。 |
 | `permission_not_granted` | `session` 工具需要可选的 `cookies` 权限。 |
+| `advanced_not_granted` | `upload`、`grab` 和 CDP 截图需要可选的 `debugger` 权限，在弹窗"可选权限"里点一次授予。 |
 | `token_required` | 桥接服务在运行但扩展没有 token。把 token 粘贴到扩展弹窗（第 5 步）。 |
 | `tab_unresponsive` | 该标签页的渲染进程冻结了。先跑 `activate` 再重试，或用 `--auto-activate`。 |
 | 全都超时 | 先跑 `node src/cli.js diag`，多半是选错了浏览器或扩展已经掉线。 |
@@ -153,8 +159,8 @@ node src/cli.js diag            # 扩展版本、id、连接状态、最近错�
 
 有两件事值得提前告诉他，因为都会让人意外：
 
-- **扩展不在商店里，也不会有。** Chrome 每次启动都会提示"停用开发者模式扩展"。这是 `debugger`
-  权限和"执行本机程序运行时传入的代码"的代价：这套组合在商店审核那里等同于远程代码执行加远程控制。
+- **商店版本只有 Edge 一条路。** Chrome 每次启动都会提示"停用开发者模式扩展"，而且 Web Store
+  那边卡在"执行运行时代码 + 站点访问"的组合上；Edge Add-ons 免费上架的材料见 `docs/STORE.md`。
 - **它驱动的是他真实登录着的浏览器。** 他登录过的一切，本机上任何能访问桥接端口的程序都够得着。
   [免责声明](DISCLAIMER.zh-CN.md)很短，建议跟链接一起发过去。
 
