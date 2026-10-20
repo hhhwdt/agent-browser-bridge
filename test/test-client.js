@@ -16,15 +16,13 @@ const fs = require('node:fs');
 const http = require('node:http');
 
 const REPO = path.join(__dirname, '..');
-// parseArgs 在 src/cli/index.js；eval 的 --file 读取在 src/cli/commands/info.js。
-const cliIndexSrc = fs.readFileSync(path.join(REPO, 'src', 'cli', 'index.js'), 'utf8');
+// eval 的 --file 读取在 src/cli/commands/info.js。
 const infoCmdSrc = fs.readFileSync(path.join(REPO, 'src', 'cli', 'commands', 'info.js'), 'utf8');
 
 /* ------------------------------------------------------------------ *
- * read.js 的参数解析：抽真实源码里的 parseArgs 来跑
+ * read.js 的参数解析：args.js 无副作用，直接用模块导出
  * ------------------------------------------------------------------ */
-const parseArgsBody = cliIndexSrc.slice(cliIndexSrc.indexOf('function parseArgs'), cliIndexSrc.indexOf('function usage'));
-const parseArgs = new Function('argv', parseArgsBody + '\nreturn parseArgs(argv);');
+const { parseArgs } = require('../src/cli/args.js');
 
 let pass = 0;
 let fail = 0;

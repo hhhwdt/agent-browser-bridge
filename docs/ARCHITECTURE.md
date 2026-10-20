@@ -13,13 +13,13 @@ made so you do not repeat them.
         │
         │  MCP over stdio: JSON-RPC, one message per line
         ▼
-   mcp.js ──────────── the tool surface: 17 tools, schemas, descriptions
+   mcp.js ──────────── the tool surface: 18 tools, schemas, descriptions
         │
         │  HTTP to 127.0.0.1:18777 — ALSO how cli.js and client.js talk to it
         ▼
    server.js ───────── the bridge: task queue, browser routing, origin checks
         │
-        │  long poll: the extension asks for work, the bridge hands it one task
+        │  WebSocket (task push) + long poll (fallback): one queue per browser
         ▼
    extension/ ──────── the only part that touches a page
         │
@@ -30,11 +30,17 @@ made so you do not repeat them.
 
 Two things about this shape matter:
 
-**The extension polls; the bridge never pushes.** A service worker cannot listen on a port, so the
-direction is inverted: `GET /poll` is held open for 25 seconds, and a task is answered on that held
-response. That is why "the extension is connected" is really "a poll is currently held", why a
-browser that stops polling looks offline within 30 seconds, and why one poll carries exactly one
-task.
+**The bridge pushes when it can, the extension polls when it must.** The extension opens a
+WebSocket to the bridge and authenticates by sending the shared token in its first `hello`
+message (a browser WebSocket cannot carry custom headers). While that channel is up, a queued
+task is pushed onto it immediately, and the poll loop in `background.js` stands down. The
+service worker keeps being reset by the browser when it goes idle; since Chrome 116 WebSocket
+activity counts toward the idle timer, and the bridge sends two heartbeats every 20 seconds — a
+control ping for dead detection plus a data frame, because an automatically answered pong never
+enters the event loop — an online extension stays resident instead of waiting for an alarm
+wake-up. If the channel is unavailable (proxy that swallows `Upgrade`, older extension),
+delivery falls back to the original held `GET /poll`; the one-task-per-dispatch-each-round
+semantics and the 30-second offline window still apply on that path.
 
 **Only the last hop needs a browser.** Everything above `extension/` is ordinary Node. That is what
 makes the offline test suite possible, and it is why the bridge and the MCP server are separate
@@ -80,6 +86,7 @@ bin paths, `npm test` spawn paths and user scripts never change. The implementat
 | Module | Holds |
 |---|---|
 | `src/server/` | config, token, audit log, per-tab leases, HTTP plumbing, the dispatch queue, update check, and `routes/` with one small function per endpoint; `src/server/index.js` holds the route table |
+| `src/actions-registry.js` | the single description of every action: HTTP path, parameters and casts, validation rules, default timeout, MCP tool schema, CLI value options; `src/server/routes/generic.js` runs it |
 | `src/cli/` | argument parsing, usage text, output helpers, the update check, and `commands/` with one file per command group; `src/cli/index.js` routes to them |
 | `src/mcp/` | tool schemas and instructions (`tools.js`), the tool → bridge call mapping (`handlers.js`), the ensure-the-bridge-is-running step (`ensure.js`) |
 | `src/version.js`, `src/config-dir.js` | the two helpers that were duplicated between the server and the CLI (`isNewerVersion`, `getConfigDir`) |
@@ -99,7 +106,8 @@ Mutable state that used to be scattered across `server.js` now has one home: `sr
 | `guards.js` | timeouts, frame selection, tab resolution, permission checks | nothing |
 | `config.js` | bridge URL, poll timings, browser identity | nothing |
 | `marks.js` | the visible "an agent touched this tab" state | inject-mark, config, guards |
-| `background.js` | poll loop, task dispatch, boot, listeners, error log | config, marks, actions |
+| `ws.js` | WebSocket task channel to the bridge; reconnect, auth via hello, task push | config |
+| `background.js` | task dispatch, poll fallback loop, boot, listeners, error log | config, marks, actions, ws.js |
 
 The dependency direction is one-way and there are no cycles. `background.js` is the only module that
 registers event listeners; `actions.js` is the only one that touches a page indirectly.
@@ -121,22 +129,28 @@ the function references no module-level name, its source is valid as an expressi
 
 ## Adding an action
 
-Be aware of the honest answer first: **an action is currently described in five places.**
+Where the pieces live, and which of them are generated:
 
-| Where | What you add |
-|---|---|
-| `extension/sw/actions-*.js` | the implementation |
-| `extension/sw/inject-*.js` | only if the page needs new code to run in it |
-| `extension/sw/background.js` | a case in `runAction` |
-| `src/server.js` | an HTTP route, and a name in `CAPABILITIES` |
-| `src/mcp/` | a tool definition and a handler |
-| `src/cli/` + `src/client.js` | a subcommand and a client method, only if it belongs on the CLI |
+| Where | What you add | Generated? |
+|---|---|---|
+| `extension/sw/actions-*.js` | the implementation | no |
+| `extension/sw/inject-*.js` | only if the page needs new code to run in it | no |
+| `extension/sw/background.js` | a case in `runAction` | no |
+| `src/actions-registry.js` | one entry: path, params and casts, validation rules, default timeout, the MCP tool schema and description | — (this is the source) |
+| `src/server/index.js` | a row in the route table (the handler is one `makeRoute` line) | handler, from the entry |
+| `src/server/config.js` | a name in `CAPABILITIES` | no |
+| `src/mcp/handlers.js` | a handler (only when the tool formats its own output) | schema + description, from the entry |
+| `src/cli/commands/` + `src/client.js` | a subcommand and a client method, only if it belongs on the CLI; value options are listed in the entry's `CLI_VALUE_OPTS` | no |
 
-That is the weakest part of the design. A registry that generated the tool schema, the route and the
-client method from one description would remove three of those edits, and it is the natural next
-structural change if the action count keeps growing. It has not been done because the presentations
-genuinely differ (the MCP schema needs descriptions, the CLI needs argument parsing), and a
-half-generic version would be worse than the duplication.
+The route, the tool schema and the CLI value options all come from the one entry, so adding a
+parameter to an action is a single edit; `test/test-registry.js` cross-checks the entry against
+the route table, the extension's action functions and the MCP handlers, so a name that only made
+it into some of the layers fails offline instead of passing review.
+
+The extension cannot share the registry file (browser ESM, zero-dependency constraint), so its
+action function names are locked to the registry by that test rather than by imports. The
+definitions that are genuinely different per consumer (an MCP description, a CLI flag name) live
+in the entry as explicit fields — the duplication left is chosen duplication, not drift.
 
 ## Hard-won constraints
 
@@ -168,8 +182,9 @@ type and key probe read-only first, then act in the one frame that matched.
 **The extension's requests to the bridge carry no `Origin`.** It holds host permission for
 `127.0.0.1:18777`, so its fetches are not CORS requests and Chrome omits the header entirely.
 The bridge requires `X-ABB-Token` on every route except `/health`; the extension reads the token
-from `chrome.storage.local` (pasted in the popup once) and sends it on every poll and result.
-A second extension cannot read the token file, so it cannot drive the bridge. See
+from `chrome.storage.local` (pasted in the popup once) and sends it on every poll and result — and,
+on the WebSocket channel, in its first `hello` message, because a browser WebSocket cannot carry
+custom headers. A second extension cannot read the token file, so it cannot drive the bridge. See
 [SECURITY.md](SECURITY.md) for the trust boundary.
 
 **Editing the extension requires a reload, and `src/cli.js reload` needs the extension to be alive.**

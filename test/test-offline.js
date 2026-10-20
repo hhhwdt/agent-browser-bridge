@@ -23,6 +23,8 @@ const { spawnSync } = require('node:child_process');
 const SUITES = [
   ['服务脚本模块图能否加载', 'test-sw-load.js'],
   ['服务端派发、队列、结果体与来源校验', 'test-server.js'],
+  ['动作注册表三方一致', 'test-registry.js'],
+  ['WebSocket 任务通道', 'test-ws.js'],
   ['eval 的执行次数与取值语义', 'test-eval.js'],
   ['写操作只在一个框架里执行', 'test-frame-targeting.js'],
   ['命令行参数解析与客户端错误归类', 'test-client.js'],

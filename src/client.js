@@ -33,6 +33,8 @@
 'use strict';
 
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18777;
@@ -69,17 +71,34 @@ function normalizeBrowserName(name) {
   return v;
 }
 
+/**
+ * 读本机 token（服务端与扩展共享的那份）。token 模式下 CLI、MCP、脚本调用的
+ * 每个接口都要带 X-ABB-Token，而文件就在同一个配置目录里——自动读省掉
+ * 每个调用方手动传一遍；文件不存在（--no-token 模式）就静默不带。
+ * createClient({ token }) 可显式覆盖。
+ */
+function readLocalToken() {
+  try {
+    const { getConfigDir } = require('./config-dir.js');
+    return fs.readFileSync(path.join(getConfigDir(), 'token'), 'utf8').trim();
+  } catch (e) {
+    return undefined;
+  }
+}
+
 class BrowserBridgeClient {
   /**
    * @param {object}  [options]
    * @param {string}  [options.host='127.0.0.1']
    * @param {number}  [options.port=18777]
    * @param {number}  [options.timeoutMs=30000] 单次请求默认超时
+   * @param {string}  [options.token] 显式指定共享 token；省略时自动读配置目录下的 token 文件
    */
   constructor(options = {}) {
     this.host = options.host || DEFAULT_HOST;
     this.port = options.port || DEFAULT_PORT;
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+    this.token = options.token !== undefined ? options.token : readLocalToken();
   }
 
   /** 低层请求。返回 { status, data }。 */
@@ -89,15 +108,20 @@ class BrowserBridgeClient {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), 'utf8');
 
+      const headers = {};
+      if (this.token) { headers['X-ABB-Token'] = this.token; }
+      if (payload) {
+        headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = payload.length;
+      }
+
       const req = http.request({
         host: this.host,
         port: this.port,
         method,
         path: urlPath,
         // agent 环境常带系统代理，这里必须显式声明不走代理
-        headers: payload
-          ? { 'Content-Type': 'application/json', 'Content-Length': payload.length }
-          : {}
+        headers
       }, (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));

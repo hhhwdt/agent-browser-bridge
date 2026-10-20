@@ -1,17 +1,20 @@
 /**
- * Agent Browser Bridge —— 路由：查询类（读页面、标签页、截图、诊断）。
+ * Agent Browser Bridge —— 路由：查询类（健康检查、读页面、标签页、截图、诊断）。
+ *
+ * 直排动作全部由动作注册表驱动（generic.js），这里只剩
+ * 健康检查的静态信息与 reload 的多播派发两段手写逻辑。
  */
 
 'use strict';
 
-const { API_VERSION, CAPABILITIES, READ_TIMEOUT_MS, allowedExtensionIds } = require('../config.js');
-const { sendJson, readJsonBody, readBody, targetMissing, badRequest } = require('../http.js');
+const { API_VERSION, CAPABILITIES, allowedExtensionIds } = require('../config.js');
+const { sendJson, readBody } = require('../http.js');
 const {
-  clampTimeout, dispatch, replyDispatch, extensionOffline,
-  connectedBrowsers, orderBrowsers, extensionConnected, pending, queuedCount
+  dispatch, connectedBrowsers, orderBrowsers, extensionConnected, pending, queuedCount
 } = require('../queue.js');
+const { makeRoute } = require('./generic.js');
 
-async function routeHealth(req, res) {
+const routeHealth = async function routeHealth(req, res) {
   sendJson(res, 200, {
     ok: true,
     service: 'agent-browser-bridge',
@@ -24,161 +27,17 @@ async function routeHealth(req, res) {
     allowedExtensionIds: Array.from(allowedExtensionIds),
     defaultBrowserOrder: orderBrowsers(connectedBrowsers())
   }, req);
-}
+};
 
-async function routeTabs(req, res, ctx) {
-  await replyDispatch(res, req, {
-    action: 'tabs',
-    browser: ctx.url.searchParams.get('browser') || undefined
-  }, READ_TIMEOUT_MS);
-}
-
-async function routeFrames(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  await replyDispatch(res, req, {
-    action: 'frames',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeMedia(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'media',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: body.frameId,
-    minImageSize: body.minImageSize,
-    maxScanChars: body.maxScanChars
-  }, clampTimeout(body.timeoutMs, 45000));
-}
-
-async function routeRead(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'read',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    selector: body.selector,
-    includeLinks: !!body.includeLinks,
-    returnHtml: !!body.returnHtml,
-    format: body.format,
-    autoActivate: !!body.autoActivate,
-    lease: !!body.lease
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeLinks(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'links',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    selector: body.selector,
-    text: body.text
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeScreenshot(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'screenshot',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    format: body.format,
-    selector: body.selector,
-    full: !!body.full
-  }, clampTimeout(body.timeoutMs, 30000));
-}
-
-async function routeEval(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  if (typeof body.code !== 'string' || !body.code.trim()) {
-    badRequest(res, req, 'missing_code',
-      '需要提供要执行的 JS 代码，用 return 返回结果，例如 --code "return document.title"');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'eval',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    code: body.code
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeSession(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'session',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    name: body.name,
-    key: body.key,
-    local: body.local,
-    session: body.session,
-    storage: body.storage
-  }, clampTimeout(body.timeoutMs, 15000));
-}
-
-async function routeDiag(req, res) {
-  const body = await readBody(req).catch(() => ({}));
-  await replyDispatch(res, req, { action: 'diag', browser: body.browser }, clampTimeout(body.timeoutMs, 10000));
-}
+const routeTabs = makeRoute('tabs');
+const routeFrames = makeRoute('frames');
+const routeMedia = makeRoute('media');
+const routeRead = makeRoute('read');
+const routeLinks = makeRoute('links');
+const routeScreenshot = makeRoute('screenshot');
+const routeEval = makeRoute('eval');
+const routeSession = makeRoute('session');
+const routeDiag = makeRoute('diag');
 
 async function routeReload(req, res) {
   const body = await readBody(req).catch(() => ({}));

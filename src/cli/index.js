@@ -12,50 +12,11 @@
 'use strict';
 
 const { createClient, BridgeError, BridgeUnavailableError } = require('../client.js');
+const { parseArgs } = require('./args.js');
 const info = require('./commands/info.js');
 const actions = require('./commands/actions.js');
 const files = require('./commands/files.js');
 const admin = require('./commands/admin.js');
-
-/* ------------------------------------------------------------------ *
- * 参数解析
- * ------------------------------------------------------------------ */
-
-function parseArgs(argv) {
-  const out = { _: [] };
-
-  // 需要取值的选项；其余 --xxx 视为布尔开关
-  const VALUE_OPTS = new Set([
-    'match', 'url', 'tabId', 'frameId', 'browser', 'selector', 'text', 'href',
-    'value', 'key', 'index', 'port', 'timeout', 'host', 'idle', 'count', 'tail',
-    // eval / screenshot / session / upload / download / save 用
-    'code', 'file', 'out', 'format', 'name', 'key', 'header', 'filename'
-  ]);
-
-  // 可重复的选项，重复出现时累加为数组：
-  //   --file   upload 传多个文件
-  //   --header download 追加多个请求头
-  const REPEATABLE_OPTS = new Set(['file', 'header']);
-
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (!a.startsWith('--')) {
-      out._.push(a);
-      continue;
-    }
-    const key = a.slice(2);
-    if (VALUE_OPTS.has(key)) {
-      if (REPEATABLE_OPTS.has(key)) {
-        (out[key] = out[key] || []).push(argv[++i]);
-      } else {
-        out[key] = argv[++i];
-      }
-    } else {
-      out[key] = true;
-    }
-  }
-  return out;
-}
 
 function usage() {
   console.log(`Agent Browser Bridge 命令行客户端

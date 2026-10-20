@@ -8,6 +8,57 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [Unreleased]
+
+### Added
+
+- WebSocket task channel: the extension opens `ws://127.0.0.1:18777/ws` and authenticates by sending
+  the shared token and its extension ID in the first `hello` message (a browser WebSocket cannot
+  carry custom headers). Queued tasks are pushed onto the channel immediately instead of waiting for
+  the next poll. The server sends two heartbeats every 20 seconds: a control ping for dead-connection
+  detection (automatically answered by the browser, no JS runs) and a `{"type":"ka"}` data frame —
+  the MV3 service worker's idle timer only resets on WebSocket traffic that enters the event loop,
+  so the keep-alive side must be ordinary data frames. The handshake, frame framing and ping/pong
+  are a minimal RFC 6455 implementation on `node:crypto` — the zero-dependency constraint holds.
+- Long-poll delivery is preserved verbatim as the fallback: when no WebSocket is connected for a
+  browser, tasks flow through the original held `GET /poll`. `diag` reports the channel state; close
+  codes 4401/4403 mirror the HTTP 401/403 semantics, and pasting a corrected token in the popup
+  reconnects immediately via `storage.onChanged`. The keep-alive alarm also re-attempts the channel,
+  because a running poll loop keeps the service worker resident and a latched auth-failed state
+  would otherwise never see a fresh bootstrap.
+- `test/test-ws.js` (offline): handshake accept-key against the RFC 6455 §1.3 sample values, task
+  push without any poll, result round-trip over HTTP, channel rejection by extension ID and by token,
+  and replacement of the channel when the same browser connects twice.
+
+### Changed
+
+- Action metadata is described once, in `src/actions-registry.js`: HTTP path, how each parameter is
+  read from the body (raw / boolean / number / enum), validation rules with their exact error codes
+  and hints, default dispatch timeouts, the MCP tool schema and description, and the CLI value
+  options. The generic route runner (`src/server/routes/generic.js`) drives validation and task
+  assembly from it; `src/mcp/tools.js` generates `TOOLS` from it; `src/cli/args.js` derives the
+  value-option whitelist from it. The 20 straight-line routes shrink to one `makeRoute` line each
+  and hand-written handlers remain only where they have real extra logic (`/mark`, `/batch`,
+  `/reload`). `test/test-registry.js` is new and cross-checks the registry against the route table,
+  the extension's action functions and the MCP handlers — the extension cannot import the registry
+  (browser ESM), so its action names are locked there instead of being centralised. Error codes,
+  hints, schemas and dispatch behaviour are byte-for-byte unchanged; all pre-existing suites pass
+  unmodified except `test-client.js`, which now reads the parser from its one real home.
+
+### Fixed
+
+- `download --maxBytes N` never reached the server: `maxBytes` was missing from the CLI value-option
+  list, so the flag was parsed as an empty switch and the number was dropped. It is now derived from
+  the registry with the rest.
+- Token mode broke every local caller, and 1.8.0 shipped it: the server requires `X-ABB-Token` on
+  all routes except `/health`, but `client.js` — which sits under the CLI and the MCP server —
+  never sent the header and offered no way to supply it. The 401 hint told users to paste the
+  token into the extension popup, which cannot help a CLI invocation. `client.js` now reads the
+  token from the same per-user config file the server uses and sends it automatically
+  (`createClient({ token })` overrides); the 401 hint names both paths. No security regression:
+  the barrier this preserves is against other extensions and other-user processes, not against a
+  process already running as the user, which could read the file anyway.
+
 ## [1.8.0] - 2026-10-20
 
 ### Added

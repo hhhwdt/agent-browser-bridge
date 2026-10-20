@@ -1,194 +1,33 @@
 /**
- * Agent Browser Bridge —— 路由：交互与标签页管理（点击、输入、导航、等待、标记）。
+ * Agent Browser Bridge —— 路由：交互与标签页管理。
+ *
+ * 直排动作由动作注册表驱动（generic.js）；这里手写的是
+ * 标记（/unmark 没有目标时要逐个在线浏览器都清一遍）与批量（逐步派发）两段。
  */
 
 'use strict';
 
-const { sendJson, readJsonBody, readBody, targetMissing, badRequest } = require('../http.js');
-const { clampTimeout, dispatch, replyDispatch, extensionOffline, connectedBrowsers } = require('../queue.js');
+const { sendJson, readJsonBody, badRequest } = require('../http.js');
+const { clampTimeout, dispatch, connectedBrowsers } = require('../queue.js');
+const { makeRoute, buildTask } = require('./generic.js');
 
-async function routeClick(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  if (!body.selector && !body.text && !body.href) {
-    badRequest(res, req, 'missing_click_target', '需要提供 selector、text 或 href 之一来定位要点击的元素');
-    return;
-  }
-  // 点击可能触发页面跳转，给稍长的等待时间
-  await replyDispatch(res, req, {
-    action: 'click',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    selector: body.selector,
-    text: body.text,
-    href: body.href,
-    index: body.index,
-    allowNonLink: !!body.allowNonLink,
-    dryRun: !!body.dryRun
-  }, clampTimeout(body.timeoutMs, 45000));
-}
-
-async function routeType(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  if (typeof body.value !== 'string') {
-    badRequest(res, req, 'missing_value', '需要提供 value（要输入的文本）');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'type',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    selector: body.selector,
-    text: body.text,
-    value: body.value,
-    method: body.method === 'html' ? 'html' : 'text',
-    clear: !!body.clear,
-    allowNonInput: !!body.allowNonInput
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeKey(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  if (!body.key) {
-    badRequest(res, req, 'missing_key');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'key',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    key: body.key,
-    selector: body.selector,
-    ctrl: !!body.ctrl,
-    shift: !!body.shift,
-    alt: !!body.alt,
-    meta: !!body.meta
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeNavigate(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (!body.url) {
-    badRequest(res, req, 'missing_url');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'navigate',
-    browser: body.browser,
-    match: body.match,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    url: body.url,
-    newTab: !!body.newTab,
-    active: !!body.active,
-    waitMs: typeof body.waitMs === 'number' ? body.waitMs : undefined
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeWait(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (extensionOffline(res, req)) { return; }
-  if (targetMissing(body)) {
-    badRequest(res, req, 'missing_target', '需要提供 match、url 或 tabId 之一');
-    return;
-  }
-  if (!body.selector && !body.text && !body.url && !body.idleMs) {
-    badRequest(res, req, 'missing_condition', '需要提供 selector、text、url 或 idleMs 作为等待条件');
-    return;
-  }
-  const waitMs = clampTimeout(body.timeoutMs, 10000);
-  await replyDispatch(res, req, {
-    action: 'wait',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    selector: body.selector,
-    text: body.text,
-    count: typeof body.count === 'number' ? body.count : undefined,
-    idleMs: typeof body.idleMs === 'number' ? body.idleMs : undefined,
-    state: body.state === 'disappear' ? 'disappear' : 'appear',
-    timeoutMs: waitMs,
-    pollMs: body.pollMs
-  }, waitMs + 5000);
-}
-
-async function routeClose(req, res) {
-  const body = await readJsonBody(req, res);
-  if (!body) { return; }
-  if (typeof body.tabId !== 'number') {
-    badRequest(res, req, 'missing_tab_id', '关闭标签页必须显式提供 tabId，不支持按 match 批量关闭');
-    return;
-  }
-  await replyDispatch(res, req, {
-    action: 'close',
-    browser: body.browser,
-    tabId: body.tabId
-  }, clampTimeout(body.timeoutMs));
-}
-
-async function routeActivate(req, res) {
-  const body = await readBody(req).catch(() => ({}));
-  await replyDispatch(res, req, {
-    action: 'activate',
-    browser: body.browser,
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId
-  }, clampTimeout(body.timeoutMs));
-}
+const routeClick = makeRoute('click');
+const routeType = makeRoute('type');
+const routeKey = makeRoute('key');
+const routeNavigate = makeRoute('navigate');
+const routeWait = makeRoute('wait');
+const routeClose = makeRoute('close');
+const routeActivate = makeRoute('activate');
 
 async function routeMark(req, res, ctx) {
   const body = await readJsonBody(req, res);
   if (!body) { return; }
-  const isUnmark = ctx.path === '/unmark';
-
-  const markTask = {
-    action: isUnmark ? 'unmark' : 'mark',
-    match: body.match,
-    url: body.url,
-    tabId: body.tabId,
-    frameId: typeof body.frameId === 'number' ? body.frameId : undefined,
-    text: body.text,
-    color: body.color,
-    ttlMs: typeof body.ttlMs === 'number' ? body.ttlMs : undefined,
-    all: !!body.all
-  };
+  const markTask = buildTask(ctx.path === '/unmark' ? 'unmark' : 'mark', body);
   const markTimeout = clampTimeout(body.timeoutMs);
 
   // 清除全部标记时标记散落在各浏览器各自的扩展存储里，只清一个会留下另一个的残留
   // （标题前缀和图标角点都还在）。没有指定浏览器与目标时，逐个在线浏览器都清一遍。
-  const broadcastUnmark = isUnmark && !body.browser
+  const broadcastUnmark = ctx.path === '/unmark' && !body.browser
     && typeof body.tabId !== 'number' && !body.match && !body.url;
 
   if (broadcastUnmark) {
