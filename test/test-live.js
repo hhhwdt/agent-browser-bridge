@@ -147,15 +147,25 @@ function startFileServer() {
     check('return 风格取到值', ret.value === expr.value, ret.value);
 
     console.log('\n[9] screenshot');
-    let shot = await ab.screenshot({ tabId, full: true });
-    if (shot && shot.error === 'advanced_not_granted') {
+    let shot = await ab.screenshot({ tabId, full: true }).catch((e) => ({ _threw: e }));
+    if (shot._threw && shot._threw.code !== 'advanced_not_granted') {
+      check('整页截图发起成功', false, { code: shot._threw.code, message: shot._threw.message });
+      shot = null;
+    } else if (shot._threw) {
       // debugger 从 1.9.0 起是可选权限，全新 profile 没人点过弹窗授予。
-      // 前台可视区域截图走退避（自带截屏），不需要 debugger，照样验动作链路；
+      // 激活标签页后走退避：前台可视区域截图不需要 debugger，照样验动作链路；
       // 整页截图等授予后的本地环境再验。
-      console.log('     debugger 未授予：改验前台可视区域（退避路径），整页截图留给已授予的环境');
-      shot = await ab.screenshot({ tabId });
+      console.log('     debugger 未授予：激活标签页后改验退避路径（可视区域），整页截图留给已授予的环境');
+      await ab.activate({ tabId });
+      shot = await ab.screenshot({ tabId }).catch((e) => ({ _threw2: e }));
+      if (shot._threw2) {
+        check('退避截图发起成功', false, { code: shot._threw2.code, message: shot._threw2.message });
+        shot = null;
+      }
     }
-    check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { error: shot.error, via: shot.via });
+    if (shot) {
+      check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { error: shot.error, via: shot.via });
+    }
 
     console.log('\n[10] download：2MB 文件（结果体约 2.7MB，旧版 1MB 上限会掐断连接）');
     const port = await startFileServer();
