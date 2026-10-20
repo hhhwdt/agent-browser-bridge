@@ -68,19 +68,22 @@ jobs:
         with:
           node-version: '22'
 
-      - uses: browser-actions/setup-chrome@v1
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
         with:
-          chrome-version: stable
+          # v2 默认装 Chrome for Testing 构建——branded stable 从 137 起忽略
+          # --load-extension，扩展根本不会加载，这个 job 曾经因此全红
+          install-dependencies: true
 
       - name: 浏览器层测试（headless Chrome + test-live.js）
         run: |
           # --no-token：CI 是一次性环境，全新 profile 里的扩展没有 token，
-          # 401 后轮询直接停止，扩展永远连不上——这个 job 曾经因此全红。
+          # 401 后轮询直接停止，扩展永远连不上。
           # --no-update-check：测试机上不查 npm 更新，日志保持干净。
           node src/server.js --no-token --no-update-check &
           SERVER_PID=$!
           sleep 2
-          CHROME_PATH=$(which google-chrome || which chromium || which chromium-browser)
+          CHROME_PATH="${{ steps.chrome.outputs.chrome-path }}"
           if [ -z "$CHROME_PATH" ]; then
             echo "Chrome not found"
             exit 1
