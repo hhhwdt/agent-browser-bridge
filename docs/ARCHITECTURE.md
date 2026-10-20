@@ -44,10 +44,10 @@ processes rather than one.
 
 ```
 src/            the Node side: the bridge, the library, and three entry points
-  server.js       the local bridge
+  server.js       the local bridge (implementation in src/server/)
   client.js       the library (main in package.json)
-  cli.js          the command line
-  mcp.js          the MCP server an agent talks to
+  cli.js          the command line (implementation in src/cli/)
+  mcp.js          the MCP server an agent talks to (implementation in src/mcp/)
   setup.js        the one-command self-check
 extension/      the browser extension (MV3)
   sw/             the service worker, split by responsibility
@@ -72,17 +72,33 @@ Three rules keep it that way:
 One note for older notes and habits: the CLI used to be `read.js` in the repository root. It is now
 `src/cli.js`.
 
+## Inside src
+
+The three entry files are thin shims (`require('./server/index.js')` etc.) so that `package.json`
+bin paths, `npm test` spawn paths and user scripts never change. The implementations:
+
+| Module | Holds |
+|---|---|
+| `src/server/` | config, token, audit log, per-tab leases, HTTP plumbing, the dispatch queue, update check, and `routes/` with one small function per endpoint; `src/server/index.js` holds the route table |
+| `src/cli/` | argument parsing, usage text, output helpers, the update check, and `commands/` with one file per command group; `src/cli/index.js` routes to them |
+| `src/mcp/` | tool schemas and instructions (`tools.js`), the tool → bridge call mapping (`handlers.js`), the ensure-the-bridge-is-running step (`ensure.js`) |
+| `src/version.js`, `src/config-dir.js` | the two helpers that were duplicated between the server and the CLI (`isNewerVersion`, `getConfigDir`) |
+| `src/client.js`, `src/setup.js` | unchanged |
+
+Mutable state that used to be scattered across `server.js` now has one home: `src/server/queue.js`.
+
 ## Inside the extension
 
 `extension/sw/` is where the size is, so it is split by responsibility:
 
 | Module | Holds | Imports from |
 |---|---|---|
-| `injected.js` | the 15 functions that get serialised into a page | **nothing** |
+| `inject-*.js` (6 files) | the functions that get serialised into a page: `inject-read` extract/links/markdown/rect/diag, `inject-click` click, `inject-edit` type/key, `inject-run` wait/eval/storage, `inject-mark` indicator/tab-mark, `inject-media` media/fetch | **nothing** |
+| `actions-*.js` (6 files) | one function per action, grouped the same way: tags/read/screenshot/session/files/interact | inject-*, config, guards |
+| `actions.js` | re-exports `actions-*.js`, so importers keep one path | actions-* |
 | `guards.js` | timeouts, frame selection, tab resolution, permission checks | nothing |
 | `config.js` | bridge URL, poll timings, browser identity | nothing |
-| `marks.js` | the visible "an agent touched this tab" state | injected, config, guards |
-| `actions.js` | one function per action the bridge can dispatch | injected, config, guards |
+| `marks.js` | the visible "an agent touched this tab" state | inject-mark, config, guards |
 | `background.js` | poll loop, task dispatch, boot, listeners, error log | config, marks, actions |
 
 The dependency direction is one-way and there are no cycles. `background.js` is the only module that
@@ -94,14 +110,14 @@ the whole graph.
 
 ### The invariant that matters
 
-**A function in `injected.js` must be self-contained.** `executeScript({func})` serialises the
-function's own source and evaluates it in the page; module scope does not come with it. Reference a
+**A function in the `inject-*.js` modules must be self-contained.** `executeScript({func})` serialises
+the function's own source and evaluates it in the page; module scope does not come with it. Reference a
 helper from another module and it compiles, passes review, and throws `ReferenceError` at the moment
 a user clicks something.
 
 `tools/check-inject-scope.js` enforces three things, and all three exist because of a real failure:
 the function references no module-level name, its source is valid as an expression (so a stray
-`export` cannot break serialisation), and `injected.js` contains no `import` at all.
+`export` cannot break serialisation), and no `inject-*.js` module contains an `import` at all.
 
 ## Adding an action
 
@@ -109,12 +125,12 @@ Be aware of the honest answer first: **an action is currently described in five 
 
 | Where | What you add |
 |---|---|
-| `extension/sw/actions.js` | the implementation |
-| `extension/sw/injected.js` | only if the page needs new code to run in it |
+| `extension/sw/actions-*.js` | the implementation |
+| `extension/sw/inject-*.js` | only if the page needs new code to run in it |
 | `extension/sw/background.js` | a case in `runAction` |
 | `src/server.js` | an HTTP route, and a name in `CAPABILITIES` |
-| `src/mcp.js` | a tool definition and a handler |
-| `src/cli.js` + `src/client.js` | a subcommand and a client method, only if it belongs on the CLI |
+| `src/mcp/` | a tool definition and a handler |
+| `src/cli/` + `src/client.js` | a subcommand and a client method, only if it belongs on the CLI |
 
 That is the weakest part of the design. A registry that generated the tool schema, the route and the
 client method from one description would remove three of those edits, and it is the natural next

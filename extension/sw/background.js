@@ -1,7 +1,7 @@
 /**
  * Agent Browser Bridge —— 入口：长轮询主循环、任务分派、启动引导、错误记录、弹窗消息。
  *
- * 这里只做"接线"，具体动作都在 actions.js，注入函数在 injected.js。
+ * 这里只做"接线"，具体动作在 actions-*.js，注入函数在 inject-*.js。
  *
  * 改动时的两条硬约束（本项目踩过）：
  *   - 注入函数必须自包含。可用 tools/check-inject-scope.js 静态检查。

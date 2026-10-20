@@ -16,12 +16,14 @@ const fs = require('node:fs');
 const http = require('node:http');
 
 const REPO = path.join(__dirname, '..');
-const readSrc = fs.readFileSync(path.join(REPO, 'src', 'cli.js'), 'utf8');
+// parseArgs 在 src/cli/index.js；eval 的 --file 读取在 src/cli/commands/info.js。
+const cliIndexSrc = fs.readFileSync(path.join(REPO, 'src', 'cli', 'index.js'), 'utf8');
+const infoCmdSrc = fs.readFileSync(path.join(REPO, 'src', 'cli', 'commands', 'info.js'), 'utf8');
 
 /* ------------------------------------------------------------------ *
  * read.js 的参数解析：抽真实源码里的 parseArgs 来跑
  * ------------------------------------------------------------------ */
-const parseArgsBody = readSrc.slice(readSrc.indexOf('function parseArgs'), readSrc.indexOf('function usage'));
+const parseArgsBody = cliIndexSrc.slice(cliIndexSrc.indexOf('function parseArgs'), cliIndexSrc.indexOf('function usage'));
 const parseArgs = new Function('argv', parseArgsBody + '\nreturn parseArgs(argv);');
 
 let pass = 0;
@@ -46,7 +48,7 @@ check('单个 --file 也是数组（读取处不必区分两种形态）',
 const evalFile = parseArgs(['node', 'read.js', 'eval', '--file', 'code.js']);
 check('eval 的 --file 同样是数组', Array.isArray(evalFile.file) && evalFile.file[0] === 'code.js',
   JSON.stringify(evalFile.file));
-check('eval 读取处取的是 args.file[0]', readSrc.includes('fs.readFileSync(args.file[0]'));
+check('eval 读取处取的是 args.file[0]', infoCmdSrc.includes('fs.readFileSync(args.file[0]'));
 
 const repeated = parseArgs(['node', 'read.js', 'read', '--match', 'a', '--match', 'b', '--links']);
 check('非可重复参数仍然后者覆盖', repeated.match === 'b', repeated.match);

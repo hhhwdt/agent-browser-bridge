@@ -107,11 +107,12 @@ function stubGlobals() {
 /** 各模块必须提供的导出（少一个都说明拆错了）。 */
 const EXPECTED = {
   'config.js': ['BRIDGE_URL', 'BROWSER_NAME', 'POLL_TIMEOUT_MS', 'RETRY_DELAY_MS', 'KEEPALIVE_ALARM'],
-  'injected.js': [
-    'extractInPage', 'clickInPage', 'linksInPage', 'typeInPage', 'keyInPage', 'indicatorInPage',
-    'diagInPage', 'waitInPage', 'tabMarkInPage', 'mediaInPage', 'readStorageInPage', 'evalInPage',
-    'rectInPage', 'fetchInPage', 'markdownInPage'
-  ],
+  'inject-read.js': ['extractInPage', 'linksInPage', 'markdownInPage', 'rectInPage', 'diagInPage'],
+  'inject-click.js': ['clickInPage'],
+  'inject-edit.js': ['typeInPage', 'keyInPage'],
+  'inject-run.js': ['waitInPage', 'evalInPage', 'readStorageInPage'],
+  'inject-mark.js': ['indicatorInPage', 'tabMarkInPage'],
+  'inject-media.js': ['mediaInPage', 'fetchInPage'],
   'guards.js': ['withTimeout', 'tabUnresponsive', 'injectAndPick', 'injectInBestFrame', 'resolveTab', 'ensureInjectable'],
   // applyBadge 只在本模块内部用，刻意不导出
   'marks.js': ['loadMarks', 'saveMarks', 'removeBadge', 'markTab', 'markTask', 'unmarkTask', 'collectMarkedTabs'],

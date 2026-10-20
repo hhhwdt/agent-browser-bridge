@@ -35,7 +35,7 @@ breaks one will be rejected regardless of what it does.
 
 - **No dependencies, no build step.** `dependencies: {}` is checked in CI. A markdown converter (item
   5) or a semver comparison (item 3) has to be written by hand.
-- **A function in `extension/sw/injected.js` must be self-contained** — `executeScript` serialises the
+- **A function in `extension/sw/inject-*.js` must be self-contained** — `executeScript` serialises the
   function's own source, module scope does not travel with it. Run `node tools/check-inject-scope.js`.
   Note it does not strip comments: mentioning another injected function's literal name in a comment
   reads as a reference, so reword the comment rather than editing the checker.
@@ -146,9 +146,9 @@ comparison is needed anyway (no dependencies), so test it against pre-release an
 visibility check when appearing), and a text substring in the body. Real pages need "it has finished
 loading" and "the route changed", which today means sleeping and hoping.
 
-**Where.** `extension/sw/injected.js` (`waitInPage`), `extension/sw/actions.js` (`waitTab`),
+**Where.** `extension/sw/inject-run.js` (`waitInPage`), `extension/sw/actions-tabs.js` (`waitTab`),
 `src/server.js` (`routeWait`, whose "selector or text required" check becomes "at least one
-condition"), `src/cli.js`, `src/client.js`, `src/mcp.js` (schema and description).
+condition"), `src/cli/`, `src/client.js`, `src/mcp/` (schema and description).
 
 - `--idle <ms>`: no in-flight `fetch`/XHR for N ms. The honest implementation is a page-side counter
   installed *before* the wait starts, because requests already in flight when the wait begins cannot
@@ -176,10 +176,10 @@ approximation.
 markdown keeps the structure that matters (headings, lists, tables, links) at a fraction of the tokens,
 and tables in particular are unusable as flat text.
 
-**Where.** `extension/sw/injected.js` — a new self-contained function (remember the checker's list in
-`tools/check-inject-scope.js` and the expected exports in `test/test-sw-load.js`), plus a `format`
-argument through `extractInPage` or a sibling function; `actions.js` (`readTab`), `server.js`
-(`routeRead`), `cli.js`, `client.js`, `mcp.js`.
+**Where.** `extension/sw/inject-read.js` — a new self-contained function (remember the checker's list
+in `tools/check-inject-scope.js` and the expected exports in `test/test-sw-load.js`), plus a
+`format` argument through `extractInPage` or a sibling function; `actions-read.js` (`readTab`),
+`server.js` (`routeRead`), `cli.js`, `client.js`, `mcp.js`.
 
 **Scope it deliberately.** Headings, paragraphs, ordered and unordered lists (one level of nesting),
 links, images, inline code, fenced code blocks, blockquotes, tables. Anything beyond that — layout
@@ -262,8 +262,8 @@ retry loop around the "extension connected" wait, and consider `--no-sandbox` on
 turns out to be unreliable, gate the job behind a label rather than deleting it — a flaky test that
 runs on demand still catches real breakage.
 
-**Acceptance.** The job passes on a clean runner and fails when `extension/sw/injected.js` is
-deliberately broken (verify that, or the job is decoration).
+**Acceptance.** The job passes on a clean runner and fails when an `extension/sw/inject-*.js` module
+is deliberately broken (verify that, or the job is decoration).
 
 ## 9. Batch actions
 

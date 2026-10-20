@@ -10,8 +10,8 @@
  *      之类的修饰就会直接语法错误。这条是服务脚本改用 ES 模块之后加的——当时靠一个
  *      单独的小实验才确认 V8 的 toString 不会带 export，与其依赖实验，不如每次都验。
  *
- *   3. injected.js 不能有任何 import。前两条是逐个函数的检查，这条是结构性的：
- *      那个模块整体不允许依赖别的模块，从源头上堵住第 1 条。
+ *   3. inject-*.js 不能有任何 import。前两条是逐个函数的检查，这条是结构性的：
+ *      放注入函数的模块整体不允许依赖别的模块，从源头上堵住第 1 条。
  *
  *   node tools/check-inject-scope.js
  */
@@ -113,19 +113,21 @@ for (const fn of INJECTED) {
   }
 }
 
-// 断言 3：injected.js 整体不允许有 import
-const injectedMod = sources.find((s) => s.file === 'injected.js');
-if (injectedMod) {
-  const importLines = injectedMod.src.split('\n').filter((l) => /^\s*import\s/.test(l));
-  if (importLines.length) {
-    problems++;
-    console.log(`  FAIL injected.js 出现了 ${importLines.length} 条 import：注入函数必须自包含`);
-  } else {
-    console.log('  ok   injected.js 没有任何 import');
-  }
-} else {
+// 断言 3：所有注入函数模块（inject-*.js）整体不允许有 import
+const injectedMods = sources.filter((s) => /^inject-.*\.js$/.test(s.file));
+if (injectedMods.length === 0) {
   problems++;
-  console.log('  FAIL 找不到 injected.js（注入函数应该集中在这个模块里）');
+  console.log('  FAIL 找不到任何 inject-*.js（页面注入函数应放在这些模块里）');
+} else {
+  for (const mod of injectedMods) {
+    const importLines = mod.src.split('\n').filter((l) => /^\s*import\s/.test(l));
+    if (importLines.length) {
+      problems++;
+      console.log(`  FAIL ${mod.file} 出现了 ${importLines.length} 条 import：注入函数必须自包含`);
+    } else {
+      console.log(`  ok   ${mod.file} 没有任何 import`);
+    }
+  }
 }
 
 console.log(problems === 0

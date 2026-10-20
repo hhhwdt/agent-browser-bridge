@@ -1,0 +1,253 @@
+/**
+ * Agent Browser Bridge —— 任务队列与派发。
+ *
+ * 同一台机器可能同时装着 Chrome 和 Edge 两个扩展实例，因此按浏览器名分别
+ * 保存长轮询连接，任务可按 browser 定向下发，避免两个浏览器互相顶替连接。
+ */
+
+'use strict';
+
+const { URL } = require('node:url');
+const { READ_TIMEOUT_MS, MAX_QUEUE } = require('./config.js');
+const { sendJson } = require('./http.js');
+const { acquireTabLease, releaseTabLease, getTabLease } = require('./leases.js');
+const { logAudit } = require('./audit.js');
+
+const heldPolls = new Map();     // 浏览器名 -> 挂起的长轮询响应
+const lastSeen = new Map();      // 浏览器名 -> 最近心跳时间
+const queues = new Map();        // 浏览器名 -> 该浏览器专属的待下发任务数组
+const pending = new Map();       // 任务 id -> { resolve, timer, browser }
+let nextTaskId = 1;
+
+const HEARTBEAT_MS = 30000;      // 超出此时间未心跳视为离线
+
+/** 取某个浏览器的专属队列，队列按浏览器隔离，互不串扰。 */
+function queueFor(browser) {
+  let q = queues.get(browser);
+  if (!q) { q = []; queues.set(browser, q); }
+  return q;
+}
+
+/** 统计待下发任务总数。 */
+function queuedCount() {
+  let n = 0;
+  for (const q of queues.values()) { n += q.length; }
+  return n;
+}
+
+/** 规范化浏览器名，用作路由键。 */
+function normalizeBrowser(name) {
+  const v = String(name || 'unknown').trim().toLowerCase();
+  if (v.includes('edg')) { return 'edge'; }
+  if (v.includes('chrome')) { return 'chrome'; }
+  if (v.includes('firefox')) { return 'firefox'; }
+  return v || 'unknown';
+}
+
+/** 当前在线的浏览器名列表。 */
+function connectedBrowsers() {
+  const names = new Set();
+  for (const name of heldPolls.keys()) { names.add(name); }
+  const now = Date.now();
+  for (const [name, ts] of lastSeen.entries()) {
+    if (now - ts < HEARTBEAT_MS) { names.add(name); }
+  }
+  return Array.from(names);
+}
+
+function extensionConnected() {
+  return connectedBrowsers().length > 0;
+}
+
+/**
+ * 未指定浏览器时的尝试顺序：Edge 优先（配合 Confluence 必用 Edge 的约定），
+ * 其余按名称排序，保证多浏览器环境下顺序稳定、结果可预期。
+ */
+function orderBrowsers(online) {
+  const rest = online.filter((b) => b !== 'edge').sort();
+  return online.includes('edge') ? ['edge', ...rest] : rest;
+}
+
+/**
+ * 把各浏览器专属队列里的任务下发给对应的浏览器。
+ * 每个任务只可能投递给它自己队列所属的那个浏览器，因此不存在跨浏览器误投。
+ */
+function flushTasks(browser) {
+  const targets = browser ? [browser] : Array.from(queues.keys());
+
+  for (const name of targets) {
+    const q = queues.get(name);
+    if (!q || q.length === 0) { continue; }
+
+    const res = heldPolls.get(name);
+    if (!res) { continue; }                              // 该浏览器未持有长轮询，等它下次轮询
+
+    // 一次轮询只下发一个任务，保证结果与任务一一对应
+    const task = q.shift();
+    heldPolls.delete(name);
+    clearTimeout(res.__holdTimer);
+    sendJson(res, 200, task, res.__req);
+  }
+}
+
+/** 归一化超时参数，限制在 1 秒到 2 分钟之间。 */
+function clampTimeout(value, fallback = READ_TIMEOUT_MS) {
+  return Math.min(Math.max(parseInt(value, 10) || fallback, 1000), 120000);
+}
+
+/** 单浏览器派发：任务只投递给指定浏览器，并等待它返回结果。 */
+function dispatchTo(browser, task, timeoutMs) {
+  return new Promise((resolve) => {
+    const q = queueFor(browser);
+    if (q.length >= MAX_QUEUE) {
+      resolve({ ok: false, error: 'queue_full', browser });
+      return;
+    }
+
+    task.id = nextTaskId++;
+    // 扩展收到任务后会校验 browser 是否与自己一致，不一致直接拒收，
+    // 从机制上保证任务不会落到错误的浏览器上
+    task.browser = browser;
+
+    const timer = setTimeout(() => {
+      pending.delete(task.id);
+      // 任务已过期，必须连同队列里还没下发的那一份一起丢掉。
+      // 否则扩展稍后重连轮询时会把它当成新任务执行：调用方早已收到 timeout
+      // 并放弃，点击、输入、关闭标签页却在之后某个时刻突然落地。
+      const queued = q.indexOf(task);
+      if (queued >= 0) { q.splice(queued, 1); }
+      resolve({ ok: false, error: 'timeout', browser, hint: '扩展在超时前没有返回结果' });
+    }, timeoutMs);
+
+    pending.set(task.id, { resolve, timer, browser });
+    q.push(task);
+    flushTasks(browser);
+  });
+}
+
+/**
+ * 智能派发。
+ * - 显式指定 browser：只投给该浏览器。
+ * - 未指定且仅一个在线：直接投给它。
+ * - 未指定且有多个在线：按 Edge 优先的顺序依次尝试，遇到 no_tab_matched
+ *   就换下一个。这样 Chrome 与 Edge 同时开着时，也能自动命中真正包含
+ *   目标标签页的那个浏览器，而不是盲选一个。
+ */
+async function dispatch(task, timeoutMs) {
+  const online = connectedBrowsers();
+  if (online.length === 0) {
+    return { ok: false, error: 'extension_not_connected' };
+  }
+
+  if (task.browser) {
+    const want = normalizeBrowser(task.browser);
+    if (!online.includes(want)) {
+      return { ok: false, error: 'browser_not_connected', browser: want, connected: online };
+    }
+    return dispatchTo(want, { ...task }, timeoutMs);
+  }
+
+  const order = orderBrowsers(online);
+  let lastMiss = null;
+
+  // 只有"要在某个浏览器里找某个标签页"的任务才需要短超时试探：目标不在时会立刻回
+  // no_tab_matched，不必为它等满整个超时。没有标签页定位信息的任务（例如清空全部标记）
+  // 不存在"找错浏览器"这回事，必须用满额超时，否则它做得完、却先被判超时。
+  //
+  // 15 秒而非 8 秒：扩展内部单次注入的预算就是 12 秒（INJECT_TIMEOUT_MS），
+  // 8 秒必然把"慢但正常"的动作误判成超时——实测清空标记耗时 8.1 秒，
+  // 调用方收到 timeout，而标记其实已经清掉了。
+  const hasTabTarget = typeof task.tabId === 'number' || !!task.match || !!task.url;
+
+  for (let i = 0; i < order.length; i++) {
+    const isLast = i === order.length - 1;
+    const attemptTimeout = (isLast || !hasTabTarget) ? timeoutMs : Math.min(timeoutMs, 15000);
+
+    const res = await dispatchTo(order[i], { ...task }, attemptTimeout);
+    if (res.ok) { return res; }
+
+    // 该浏览器里没有目标标签页，换下一个继续找
+    if (res.error === 'no_tab_matched') { lastMiss = res; continue; }
+    return res;
+  }
+
+  return lastMiss || { ok: false, error: 'no_tab_matched' };
+}
+
+/** 扩展不在线就回 503 并返回 true（已回过包）。 */
+function extensionOffline(res, req) {
+  if (extensionConnected()) { return false; }
+  sendJson(res, 503, { ok: false, error: 'extension_not_connected' }, req);
+  return true;
+}
+
+/** 派发任务并按 ok / 502 回包——绝大多数接口的收尾都是这三行。 */
+async function replyDispatch(res, req, task, timeoutMs) {
+  const startTime = Date.now();
+  const caller = req.socket.remotePort;
+
+  // per-tab lease：防止两个 agent 同时操作同一个标签页
+  if (task.lease && typeof task.tabId === 'number') {
+    if (!acquireTabLease(task.tabId, caller)) {
+      const holder = getTabLease(task.tabId);
+      sendJson(res, 409, {
+        ok: false,
+        error: 'tab_busy',
+        tabId: task.tabId,
+        hint: `标签页正被其他 caller 持有（${holder ? holder.caller : 'unknown'}）。稍后再试，或不传 lease 跳过。`
+      }, req);
+      return;
+    }
+  }
+
+  let result;
+  try {
+    result = await dispatch(task, timeoutMs);
+
+    // autoActivate：遇到冻结标签页时先唤醒再重试一次
+    if (!result.ok && result.error === 'tab_unresponsive' && task.autoActivate && typeof task.tabId === 'number') {
+      await dispatch({ action: 'activate', tabId: task.tabId, browser: task.browser }, 10000);
+      result = await dispatch(task, timeoutMs);
+    }
+  } finally {
+    if (task.lease && typeof task.tabId === 'number') {
+      releaseTabLease(task.tabId, caller);
+    }
+  }
+
+  const duration = Date.now() - startTime;
+
+  // 审计日志：只记动作元数据，不记页面内容
+  logAudit({
+    timestamp: new Date().toISOString(),
+    action: task.action,
+    target: {
+      match: task.match || undefined,
+      tabId: task.tabId || undefined,
+      host: task.url ? (() => { try { return new URL(task.url).host; } catch (e) { return undefined; } })() : undefined
+    },
+    outcome: result.ok ? 'ok' : (result.error || 'unknown'),
+    duration,
+    caller: req.socket.remotePort
+  });
+
+  sendJson(res, result.ok ? 200 : 502, result, req);
+}
+
+module.exports = {
+  heldPolls,
+  lastSeen,
+  pending,
+  queueFor,
+  queuedCount,
+  normalizeBrowser,
+  connectedBrowsers,
+  orderBrowsers,
+  flushTasks,
+  clampTimeout,
+  dispatch,
+  dispatchTo,
+  extensionConnected,
+  extensionOffline,
+  replyDispatch
+};

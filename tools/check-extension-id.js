@@ -40,20 +40,15 @@ if (!manifest.key) {
 const der = Buffer.from(manifest.key, 'base64');
 const derivedId = extensionIdFromDer(der);
 
-let serverSrc;
+let serverId;
 try {
-  serverSrc = fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8');
+  // DEFAULT_EXTENSION_ID 在 config.js 里定义；直接取模块的真实值做校验，
+  // 不写死「常量写在哪个文件」——重构挪文件不会让这个检查静默失效。
+  serverId = require(path.join(root, 'src', 'server', 'config.js')).DEFAULT_EXTENSION_ID;
 } catch (e) {
-  console.error('读不到 server.js：' + e.message);
+  console.error('读不到 src/server/config.js：' + e.message);
   process.exit(1);
 }
-
-const m = /const DEFAULT_EXTENSION_ID = '([^']+)'/.exec(serverSrc);
-if (!m) {
-  console.error('server.js 里没找到 DEFAULT_EXTENSION_ID');
-  process.exit(1);
-}
-const serverId = m[1];
 
 console.log(`manifest key 推导出的 ID : ${derivedId}`);
 console.log(`server.js 允许的默认 ID : ${serverId}`);

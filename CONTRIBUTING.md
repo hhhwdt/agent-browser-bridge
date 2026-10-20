@@ -58,13 +58,13 @@ Suites that need a real browser are separate and need your own setup:
 `extension/sw/` is where the size is. Three constraints apply, all of which have already been
 violated once:
 
-1. **A function in `injected.js` must be self-contained.** `executeScript({ func })` serialises the
-   function's own source into the page; module scope does not travel with it. Referencing a helper
-   from another module compiles fine, passes review, and throws `ReferenceError` the moment a user
-   clicks something. Run `node tools/check-inject-scope.js` after touching `injected.js` — it is
-   also part of the offline suite. Note that the checker does not strip comments, so mentioning
-   another function's literal name in a comment reads as a reference; reword the comment instead of
-   touching the shared checker.
+1. **A function in the `sw/inject-*.js` modules must be self-contained.** `executeScript({ func })`
+   serialises the function's own source into the page; module scope does not travel with it.
+   Referencing a helper from another module compiles fine, passes review, and throws
+   `ReferenceError` the moment a user clicks something. Run `node tools/check-inject-scope.js`
+   after touching any `inject-*.js` file — it is also part of the offline suite. Note that the
+   checker does not strip comments, so mentioning another function's literal name in a comment
+   reads as a reference; reword the comment instead of touching the shared checker.
 2. **Every injection needs a timeout.** A frozen tab's renderer never returns, and an untimed
    `executeScript` hangs the task and the poll loop with it. Use the helpers in `guards.js`.
 3. **A write action must not run in every frame.** `allFrames: true` runs the function in each frame;
@@ -85,12 +85,12 @@ An action is described in five places today:
 
 | Where | What you add |
 |---|---|
-| `extension/sw/actions.js` | the implementation |
-| `extension/sw/injected.js` | only if the page needs new code to run in it |
+| `extension/sw/actions-*.js` | the implementation |
+| `extension/sw/inject-*.js` | only if the page needs new code to run in it |
 | `extension/sw/background.js` | a case in `runAction` |
 | `src/server.js` | an HTTP route, and a name in `CAPABILITIES` |
-| `src/mcp.js` | a tool definition and a handler |
-| `src/cli.js` + `src/client.js` | a subcommand and a client method, only if it belongs on the CLI |
+| `src/mcp/` | a tool definition and a handler |
+| `src/cli/` + `src/client.js` | a subcommand and a client method, only if it belongs on the CLI |
 
 That is the weakest part of the design, and it is not an accident: the presentations genuinely
 differ (the MCP schema needs descriptions, the CLI needs argument parsing). If you see a clean way to

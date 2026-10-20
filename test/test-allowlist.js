@@ -58,12 +58,12 @@ function startServer(extraArgs) {
 
 (async () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'extension', 'manifest.json'), 'utf8'));
-  const serverSrc = fs.readFileSync(path.join(REPO, 'src', 'server.js'), 'utf8');
+  // 服务端常量按模块取真实值，不写死它在哪个文件，重构挪文件不会让检查静默失效
+  const declared = require(path.join(REPO, 'src', 'server', 'config.js')).DEFAULT_EXTENSION_ID;
 
   console.log('\n[1] 清单公钥推导的 ID 与服务端常量一致');
   check('清单里有 key', typeof manifest.key === 'string' && manifest.key.length > 100);
   const derived = extensionIdFromBase64Key(manifest.key);
-  const declared = (/const DEFAULT_EXTENSION_ID = '([^']+)'/.exec(serverSrc) || [])[1];
   check('推导结果形如 32 位 a-p', /^[a-p]{32}$/.test(derived), derived);
   check('服务端常量与清单一致（换 key 时最容易忘记同步这里）', declared === derived,
     `服务端=${declared} 清单=${derived}`);

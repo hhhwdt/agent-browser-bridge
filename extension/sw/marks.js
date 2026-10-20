@@ -5,7 +5,7 @@
 
 'use strict';
 
-import { indicatorInPage, tabMarkInPage } from './injected.js';
+import { indicatorInPage, tabMarkInPage } from './inject-mark.js';
 import { BROWSER_NAME } from './config.js';
 import { ensureInjectable, resolveTab, withTimeout } from './guards.js';
 
