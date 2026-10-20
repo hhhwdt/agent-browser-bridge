@@ -33,6 +33,7 @@ const REQUIRED = [
   'src/mcp.js',
   'src/client.js',
   'src/setup.js',
+  'src/server/ws.js',
   'extension/manifest.json',
   'extension/sw/background.js',
   'extension/sw/actions.js',
@@ -51,6 +52,7 @@ const REQUIRED = [
   'extension/sw/guards.js',
   'extension/sw/marks.js',
   'extension/sw/config.js',
+  'extension/sw/ws.js',
   'docs/SECURITY.md',
   'scripts/start-server.ps1'
 ];

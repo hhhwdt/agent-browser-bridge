@@ -71,7 +71,7 @@ without a `Referer`, and CDNs that refuse cross-origin reads.
 ```mermaid
 flowchart LR
     A["agent<br/>(CLI / client.js / any HTTP)"] -->|"HTTP<br/>127.0.0.1:18777"| S["server.js<br/>local bridge"]
-    S <-->|"long-poll<br/>(one queue per browser)"| X["extension<br/>service worker"]
+    S <-->|"WebSocket push<br/>+ long-poll fallback<br/>(one queue per browser)"| X["extension<br/>service worker"]
     X -->|"chrome.scripting"| T["your tabs"]
     X -->|"chrome.debugger (CDP)"| C["Fetch / Page domains"]
     C --> T
@@ -87,7 +87,7 @@ sequenceDiagram
     participant X as Extension
     participant B as Browser tab
     A->>S: POST /read { match }
-    S->>X: task over the browser's long-poll
+    S->>X: task over the extension's WebSocket<br/>(long-poll when WS is unavailable)
     X->>B: executeScript across all frames
     B-->>X: extracted text
     X->>S: POST /result
@@ -120,7 +120,7 @@ the one you are looking at — which is the whole point.
 | `session` | Read the tab's cookies and web storage *(opt-in permission)* |
 | `tabs` `mark` `unmark` `close` `activate` | Tab management, plus a visible "agent is working here" marker |
 | `frames` | Diagnose which frame holds the editor, and how it is editable |
-| `diag` | Extension runtime diagnostics: version, polling, restarts, errors |
+| `diag` | Extension runtime diagnostics: version, WS channel state, restarts, errors |
 
 Chrome and Edge run side by side, fully isolated, with automatic routing.
 
@@ -503,7 +503,9 @@ something in practice:
   `Origin` header at all (`<img>`, `<script>`, prefetch) are accepted, because that is how local
   scripts talk to the bridge, and how the extension itself talks to it. Such a request can neither
   read a response nor post a task result, but it can trigger a `/tabs` dispatch and hold the poll
-  slot, which costs the next task its delivery.
+  slot, which costs the next task its delivery. The WebSocket channel authenticates with the same
+  shared token in its first `hello` message (a browser WebSocket cannot carry custom headers), so a
+  page cannot register a channel by URL guessing alone.
 - Site access is **denied by default**, enforced by the browser's permission system. The install
   manifest requests no host permissions beyond the local bridge.
 - The server rejects extension origins whose ID is not on its allowlist, so an extension that has
@@ -624,7 +626,8 @@ extension/               the browser extension (MV3)
   manifest.json          permissions, entry point, public key
   popup.html/.js         status, site grants, opt-in permissions, clear marks
   sw/                    the service worker, split by responsibility
-    background.js        poll loop, task dispatch, boot, listeners
+    background.js        task dispatch, poll fallback, boot, listeners
+    ws.js                WebSocket task channel (push while connected, poll takes over on drop)
     actions.js           one function per action, grouped into actions-*.js files
     inject-*.js          the functions that get serialised into a page
     marks.js             the visible "an agent touched this tab" state

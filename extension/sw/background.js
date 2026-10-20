@@ -12,9 +12,12 @@
 
 import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
 import { MARKS_KEY, collectMarkedTabs, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
+import { startWs, retryWs, wsConnected, wsState } from './ws.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
 
 let loopRunning = false;
+/** WebSocket 回调登记：bootstrap 填写，保活闹钟的 retryWs 救援复用。 */
+let keepWs = null;
 
 /** 返回扩展的运行诊断信息：标识、连接状态、错误日志。 */
 
@@ -64,6 +67,8 @@ async function diagAction() {
       // 服务端按扩展 ID 放行，这里报出来便于排查 403（自己加载的扩展 ID 应与服务端一致）
       extensionId: chrome.runtime.id,
       loopRunning,
+      // WebSocket 任务通道状态（1.9 起 healthy=已鉴权并回 ready）
+      ws: wsState(),
       // service worker 启动次数与时间，用于判断是否被频繁回收
       boot,
       markedTabs: actuallyMarked,
@@ -331,8 +336,15 @@ async function pollLoop() {
     // 时空转耗电"，但这里失败的多半只是一次回环连接的 ECONNREFUSED，代价可以忽略；
     // 而退避到 30 秒的代价是：桥接重启后扩展最长要等 30 秒才连上，这期间所有工具
     // 都返回 extension_not_connected（实测踩到，冷启动时尤其明显）。
+    //
+    // WebSocket 通道在线时轮询让位（任务由服务端直接推下来，通道自己维持心跳）。
+    // 这里只是歇口气，不退出循环：通道一断，下一次循环就会回到轮询，回退无缝。
     for (;;) {
       try {
+        if (wsConnected()) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
         const result = await pollOnce();
         if (result && result.authFailed) {
           // token 被拒绝：不重试，等用户在弹窗里更新
@@ -358,6 +370,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
     pollLoop();
+    // 通道救援：长轮询兜底会一直保持 SW 活动，authFailed 之类卡死的状态
+    // 等不到下一次 bootstrap，闹钟在这里按同样的节拍补一条重试
+    if (keepWs) { retryWs(keepWs.onTask, keepWs.logError); }
   }
 });
 
@@ -446,6 +461,27 @@ function bootstrap() {
     logError('bootstrap.loadMarks', e);
   }
   pollLoop();
+
+  // WebSocket 任务通道。任务推进 WS 后由 onTask 走与轮询完全相同的处理路径
+  //（异步执行 + HTTP POST /result 回传），通道只改任务的"到达方式"。
+  // 回调存进 keepWs：保活闹钟的 retryWs 救援复用同一处理路径。
+  try {
+    keepWs = {
+      onTask: (task) => {
+        handleTask(task)
+          .then((result) => postResult(task.id, result))
+          .catch((e) => postResult(task.id, {
+            ok: false,
+            error: 'handler_exception',
+            message: String(e && e.message ? e.message : e)
+          }));
+      },
+      logError
+    };
+    startWs(keepWs.onTask, keepWs.logError);
+  } catch (e) {
+    logError('bootstrap.startWs', e);
+  }
 }
 
 /* ------------------------------------------------------------------ *

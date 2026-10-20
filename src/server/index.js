@@ -24,6 +24,7 @@
  *   POST /wait   /frames  /diag           同步与诊断
  *   POST /mark   /unmark  /activate /close /reload  标签页与扩展管理
  *   GET  /poll   /result                  扩展专用（长轮询与回传）
+ *   GET  /ws（upgrade）                   扩展专用（WebSocket 任务推送）
  *
  * 路由说明：
  *   请求可带 browser 指定 edge / chrome；未指定时按 edge → chrome 顺序逐个尝试，
@@ -41,6 +42,7 @@
  *   leases.js   per-tab 互斥
  *   http.js     请求体读写、CORS、来源校验
  *   queue.js    长轮询连接与任务派发
+ *   ws.js       WebSocket 任务通道（RFC 6455 最小实现，无依赖）
  *   routes/     一个接口一个函数，路由表在本文件
  *   update.js   更新检查（cli 有自己独立的一份，行为不同：无缓存、每次现查）
  */
@@ -53,6 +55,7 @@ const { PORT, HOST } = require('./config.js');
 const { hasValidToken } = require('./token.js');
 const { sendJson, isAllowedOrigin, isExtensionOrigin, reportRejectedOrigin } = require('./http.js');
 const { checkUpdate } = require('./update.js');
+const { attach: attachWs } = require('./ws.js');
 const poll = require('./routes/poll.js');
 const read = require('./routes/read.js');
 const files = require('./routes/files.js');
@@ -137,7 +140,7 @@ async function handle(req, res) {
     sendJson(res, 401, {
       ok: false,
       error: 'token_required',
-      hint: '需要 X-ABB-Token 请求头。请从桥接服务配置目录的 token 文件复制到扩展弹窗。'
+      hint: '需要 X-ABB-Token 请求头。扩展把它粘在弹窗里；本地调用方（CLI / MCP / client.js）会自动读同一个 token 文件带上——手写请求才需要从该文件取值自行加头。'
     }, req);
     return;
   }
@@ -156,6 +159,9 @@ server.listen(PORT, HOST, () => {
   console.log('等待浏览器扩展连接…');
   checkUpdate();
 });
+
+// WebSocket 只接 /ws；鉴权与注册在 ws.js（hello 消息带 token，头里放不了自定义值）
+attachWs(server);
 
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {

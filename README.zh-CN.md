@@ -67,7 +67,7 @@ CDN 拒绝跨域读取。
 ```mermaid
 flowchart LR
     A["agent<br/>（CLI / client.js / 任意 HTTP）"] -->|"HTTP + X-ABB-Token<br/>127.0.0.1:18777"| S["server.js<br/>本地桥接服务"]
-    S <-->|"长轮询<br/>每个浏览器独立队列"| X["扩展<br/>service worker"]
+    S <-->|"WebSocket 推送<br/>长轮询作回退<br/>每个浏览器独立队列"| X["扩展<br/>service worker"]
     X -->|"chrome.scripting"| T["你的标签页"]
     X -->|"chrome.debugger（CDP）"| C["Fetch / Page 域"]
     C --> T
@@ -83,7 +83,7 @@ sequenceDiagram
     participant X as 扩展
     participant B as 浏览器标签页
     A->>S: POST /read { match, X-ABB-Token }
-    S->>X: 通过长轮询下发任务
+    S->>X: 通过 WebSocket 下发任务<br/>（WS 不可用时走长轮询）
     X->>B: executeScript（覆盖所有框架）
     B-->>X: 提取到的文本
     X->>S: POST /result
@@ -115,7 +115,7 @@ sequenceDiagram
 | `session` | 读取标签页的 Cookie 与站点存储（**可选权限**） |
 | `tabs` `mark` `unmark` `close` `activate` | 标签页管理，以及「agent 正在操作」的可见标记 |
 | `frames` | 诊断编辑器在哪个框架、以何种方式可编辑 |
-| `diag` | 扩展运行诊断：版本、轮询、重启次数、错误日志 |
+| `diag` | 扩展运行诊断：版本、WS 通道状态、重启次数、错误日志 |
 | `batch` | 批量执行多个动作，按顺序执行，每步独立返回结果 |
 | `read --format markdown` | 获取结构化 Markdown 而非纯文本 |
 | `read --auto-activate` | 自动唤醒冻结标签页并重试 |
@@ -604,7 +604,8 @@ extension/               MV3 扩展（Chrome + Edge 通用）
   popup.html/.js         状态、站点授权、可选权限、token 配置、清除标记
   _locales/               i18n 文案（en + zh_CN）
   sw/                    service worker，按职责拆分
-    background.js        轮询、任务分派、启动、事件监听
+    background.js        任务分派、轮询回退、启动、事件监听
+    ws.js                WebSocket 任务通道（连通时推送任务，断开后轮询自动接管）
     actions.js           一个动作一个函数，按主题放进 actions-*.js
     inject-*.js          注入到页面里执行的函数
     marks.js             页面上可见的「被 agent 动过」标记

@@ -17,6 +17,7 @@ const heldPolls = new Map();     // 浏览器名 -> 挂起的长轮询响应
 const lastSeen = new Map();      // 浏览器名 -> 最近心跳时间
 const queues = new Map();        // 浏览器名 -> 该浏览器专属的待下发任务数组
 const pending = new Map();       // 任务 id -> { resolve, timer, browser }
+const wsChannels = new Map();    // 浏览器名 -> WebSocket 通道（registerWsChannel 登记）
 let nextTaskId = 1;
 
 const HEARTBEAT_MS = 30000;      // 超出此时间未心跳视为离线
@@ -47,6 +48,7 @@ function normalizeBrowser(name) {
 /** 当前在线的浏览器名列表。 */
 function connectedBrowsers() {
   const names = new Set();
+  for (const name of wsChannels.keys()) { names.add(name); }
   for (const name of heldPolls.keys()) { names.add(name); }
   const now = Date.now();
   for (const [name, ts] of lastSeen.entries()) {
@@ -71,6 +73,10 @@ function orderBrowsers(online) {
 /**
  * 把各浏览器专属队列里的任务下发给对应的浏览器。
  * 每个任务只可能投递给它自己队列所属的那个浏览器，因此不存在跨浏览器误投。
+ *
+ * 投递优先走 WebSocket 通道（在注册中就代表连接活着、已过心跳），没有 WS 的
+ * 浏览器回落到长轮询槽位——这条就是老路径，保持 1.8.0 的语义不动：扩展不在线
+ * 或 WS 被环境拦截时，任务照旧等下一次 /poll。
  */
 function flushTasks(browser) {
   const targets = browser ? [browser] : Array.from(queues.keys());
@@ -78,6 +84,20 @@ function flushTasks(browser) {
   for (const name of targets) {
     const q = queues.get(name);
     if (!q || q.length === 0) { continue; }
+
+    const channel = wsChannels.get(name);
+    if (channel) {
+      const task = q.shift();
+      try {
+        channel.sendTask(task);
+      } catch (e) {
+        // 发送失败说明连接其实已死（还没触发 onclose 清理）：把任务放回队首，
+        // 停用这个通道，落到长轮询分支兜底。不应有静默吞任务的情况。
+        q.unshift(task);
+        unregisterWsChannel(name, channel);
+      }
+      continue;
+    }
 
     const res = heldPolls.get(name);
     if (!res) { continue; }                              // 该浏览器未持有长轮询，等它下次轮询
@@ -87,6 +107,25 @@ function flushTasks(browser) {
     heldPolls.delete(name);
     clearTimeout(res.__holdTimer);
     sendJson(res, 200, task, res.__req);
+  }
+}
+
+/**
+ * 登记一条鉴权过的 WebSocket 通道；同一浏览器的旧通道被顶替并关闭。
+ * 由 routes/ws.js 鉴权通过后调用，关闭时 unregisterWsChannel 摘除。
+ */
+function registerWsChannel(browser, channel) {
+  const old = wsChannels.get(browser);
+  if (old && old !== channel) {
+    try { old.close(1000); } catch (e) { /* 旧通道已死 */ }
+  }
+  wsChannels.set(browser, channel);
+}
+
+/** 摘除一条通道。只在传入的仍是登记的那条时生效，防止把重连后的新通道误摘。 */
+function unregisterWsChannel(browser, channel) {
+  if (wsChannels.get(browser) === channel) {
+    wsChannels.delete(browser);
   }
 }
 
@@ -244,6 +283,8 @@ module.exports = {
   connectedBrowsers,
   orderBrowsers,
   flushTasks,
+  registerWsChannel,
+  unregisterWsChannel,
   clampTimeout,
   dispatch,
   dispatchTo,

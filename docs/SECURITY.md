@@ -32,7 +32,10 @@ sandbox, and it does not try to protect you from software you chose to run.
   extension" to "any process that can read your config directory".
 - **A web page you visit.** Pages cannot read the token file. They can still reach `/health`
   and trigger a `/tabs` dispatch, but they cannot poll for tasks or call any action because
-  they cannot send `X-ABB-Token`.
+  they cannot send `X-ABB-Token`. The WebSocket channel requires the token in its first
+  `hello` message too (sent after the upgrade, since a browser WebSocket cannot carry headers),
+  and extension IDs must match the server allowlist, so a page cannot enter the task queue by
+  connecting to `ws://127.0.0.1:18777/ws`.
 - **The user.** Nobody is protected from the operator of the machine.
 
 ## Sharp edges
