@@ -127,7 +127,7 @@ without running a self-hosted `.crx` + `update_url` (which needs HTTPS hosting a
 worth it for a team, not for this stage).
 
 **Where.** `src/server.js` and `src/cli.js diag`: on start and on demand, read
-`https://registry.npmjs.org/agent-browser-bridge/latest` with a short timeout, compare against
+`https://registry.npmjs.org/@hhhwdt%2fagent-browser-bridge/latest` with a short timeout, compare against
 `package.json` (which `tools/check-version.js` already keeps equal to the manifest), and print one
 line. Fire-and-forget: never delay startup, cache the answer for a day under the config dir, and add
 `--no-update-check`. Use the public registry explicitly — a machine configured against a mirror

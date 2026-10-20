@@ -165,7 +165,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restart-server.ps1
 
 ```bash
 npm i -g .                     # 从克隆目录装：装上下面三个命令
-npm i -g agent-browser-bridge  # 包发布之后，从 registry 装是同一个效果
+npm i -g @hhhwdt/agent-browser-bridge  # 包发布之后，从 registry 装是同一个效果
 ```
 
 装上之后有 `agent-browser-bridge`（桥接）、`agent-browser-bridge-setup`（自检）、

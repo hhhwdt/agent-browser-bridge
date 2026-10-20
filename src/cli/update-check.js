@@ -10,7 +10,7 @@ const { isNewerVersion } = require('../version.js');
 /** 检查 npm registry 上是否有新版本，有新版本时打印一行提示。 */
 async function checkUpdate() {
   try {
-    const res = await fetch('https://registry.npmjs.org/agent-browser-bridge/latest', {
+    const res = await fetch('https://registry.npmjs.org/@hhhwdt%2fagent-browser-bridge/latest', {
       signal: AbortSignal.timeout(5000)
     });
     if (!res.ok) { return; }

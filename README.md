@@ -168,7 +168,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restart-server.ps1
 
 ```bash
 npm i -g .                     # from a clone: installs the three commands above
-npm i -g agent-browser-bridge  # the same, once the package is published
+npm i -g @hhhwdt/agent-browser-bridge  # the same, once the package is published
 ```
 
 That gives `agent-browser-bridge` (the bridge), `agent-browser-bridge-setup` (the self-check) and

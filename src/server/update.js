@@ -13,7 +13,7 @@ const { argv, getConfigDir } = require('./config.js');
 const { isNewerVersion } = require('../version.js');
 
 const NO_UPDATE_CHECK = argv.includes('--no-update-check');
-const UPDATE_CHECK_URL = 'https://registry.npmjs.org/agent-browser-bridge/latest';
+const UPDATE_CHECK_URL = 'https://registry.npmjs.org/@hhhwdt%2fagent-browser-bridge/latest';
 const UPDATE_CHECK_CACHE_MS = 24 * 60 * 60 * 1000; // 一天
 
 /** 检查更新，有新版本时打印一行提示。 */
@@ -49,7 +49,7 @@ async function checkUpdate() {
 
     if (isNewerVersion(latest, current)) {
       console.log(`[update] 新版本可用: ${latest}（当前 ${current}）`);
-      console.log('[update] 运行 npm update -g agent-browser-bridge 更新');
+      console.log('[update] 运行 npm update -g @hhhwdt/agent-browser-bridge 更新');
     }
   } catch (e) {
     // 离线或网络错误，静默失败

@@ -174,7 +174,7 @@ Two things worth saying up front, because both surprise people:
   local program can reach the bridge port. [DISCLAIMER.md](DISCLAIMER.md) is short; send it along.
 
 For a version with **no path anywhere**, publish to npm first: they then run
-`npm i -g agent-browser-bridge` and use the command names (`agent-browser-bridge` for the bridge,
+`npm i -g @hhhwdt/agent-browser-bridge` and use the command names (`agent-browser-bridge` for the bridge,
 `agent-browser-bridge-setup` for the self-check above, `agent-browser-bridge-mcp` for step 4) with
 no clone and no path to copy. The package carries `extension/`, so step 2 still works: the
 self-check prints the folder to load.
