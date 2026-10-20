@@ -44,14 +44,11 @@ async function diagAction() {
   // 必需权限里的桥接地址要滤掉：那不是用户授的，混在列表里会让人以为已经授权过什么。
   let grantedOrigins = [];
   let cookiesGranted = false;
-  let debuggerGranted = false;
   let allSitesGranted = false;
   try {
     const perms = await chrome.permissions.getAll();
     grantedOrigins = (perms.origins || []).filter((o) => !o.includes('127.0.0.1') && !o.includes('localhost'));
     cookiesGranted = (perms.permissions || []).includes('cookies');
-    // 可选权限的实时状态报给 setup：决定"增强功能"要不要引导授权
-    debuggerGranted = (perms.permissions || []).includes('debugger');
     allSitesGranted = grantedOrigins.some((o) => o === '*://*/*' || o === 'http://*/*' || o === 'https://*/*');
   } catch (e) { /* 权限查询失败时留空，不阻断诊断 */ }
 
@@ -75,7 +72,6 @@ async function diagAction() {
       grantedOrigins,
       allSitesGranted,
       cookiesGranted,
-      debuggerGranted,
       errorCount: errors.length,
       errors
     }

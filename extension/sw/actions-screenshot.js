@@ -5,7 +5,7 @@
  */
 
 import { rectInPage } from './inject-read.js';
-import { advancedNotGranted, INJECT_TIMEOUT_MS, ensureInjectable, resolveTab, withTimeout } from './guards.js';
+import { INJECT_TIMEOUT_MS, ensureInjectable, resolveTab, withTimeout } from './guards.js';
 
 async function captureByCdp(tabId, format, clip, beyondViewport) {
   const target = { tabId };
@@ -128,11 +128,6 @@ export async function screenshotTab(task) {
 
   const format = task.format === 'jpeg' ? 'jpeg' : 'png';
 
-  // debugger 默认不授予（可选权限）。未授予时 CDP 整条路不可用：
-  // 后台标签页/整页/跨框架元素直接报可理解的错误，
-  // 前台可视区域退回扩展自带截屏，与"CDP 失败"的退避语义一致。
-  const notGranted = await advancedNotGranted();
-
   // 元素截图：先量出元素在页面坐标里的矩形。
   // 主框架直接注入量；指定了子框架就交给 CDP——注入量到的坐标是那个框架自己的
   // 坐标系，直接当 clip 用会截到页面别的区域。
@@ -141,11 +136,8 @@ export async function screenshotTab(task) {
     const frameId = typeof task.frameId === 'number' ? task.frameId : 0;
     clip = frameId === 0
       ? await elementRectInMainFrame(tab.id, task.selector)
-      : (notGranted ? null : await elementRectByCdp(tab.id, task.selector, frameId));
+      : await elementRectByCdp(tab.id, task.selector, frameId);
     if (!clip) {
-      if (notGranted && frameId !== 0) {
-        return { ...notGranted, url: tab.url };
-      }
       return {
         ok: false,
         error: 'element_not_found',
@@ -159,81 +151,65 @@ export async function screenshotTab(task) {
     }
   }
 
-  // 未授予时不允许走 CDP；非激活标签页连退避都不可用（captureVisibleTab 只截
-  // 当前可见标签页，硬截会返回同一窗口里另一个标签页的画面），直接报门禁错误。
-  if (notGranted && !tab.active) {
-    return { ...notGranted, url: tab.url };
-  }
-
   // 首选 CDP：能截后台标签页、整页和指定元素（中途会短暂附加调试器）
-  let cdpMessage = null;
-  if (!notGranted) {
-    try {
-      const cdp = await captureByCdp(tab.id, format, clip, !!task.full || !!clip);
-      return {
-        ok: true,
-        data: {
-          tabId: tab.id,
-          url: tab.url,
-          width: cdp.width || tab.width || null,
-          height: cdp.height || tab.height || null,
-          format,
-          via: 'cdp',
-          selector: task.selector || null,
-          fullPage: !!task.full,
-          dataUrl: cdp.dataUrl
-        }
-      };
-    } catch (e) {
-      cdpMessage = String(e && e.message ? e.message : e);
-
-      // 退避：CDP 不可用时改用扩展自带截屏，但它只能截当前可见标签页
-      if (!tab.active) {
-        return {
-          ok: false,
-          error: 'capture_failed',
-          url: tab.url,
-          message: cdpMessage,
-          hint: 'CDP 截屏失败且该标签页不是激活状态（扩展自带截屏只能截当前可见标签页）。'
-            + '可先关掉该标签页的 DevTools，或让该页面在前台后重试。'
-        };
-      }
-    }
-  }
-
   try {
-    const dataUrl = await withTimeout(
-      chrome.tabs.captureVisibleTab(tab.windowId, { format }),
-      15000
-    );
+    const cdp = await captureByCdp(tab.id, format, clip, !!task.full || !!clip);
     return {
       ok: true,
       data: {
         tabId: tab.id,
         url: tab.url,
-        width: tab.width || null,
-        height: tab.height || null,
+        width: cdp.width || tab.width || null,
+        height: cdp.height || tab.height || null,
         format,
-        via: 'captureVisibleTab',
-        selector: null,
-        fullPage: false,
-        note: notGranted
-          ? '未授予“增强功能”权限，退避用了扩展自带截屏：只截到当前可见标签页的可视区域；'
-            + '整页、后台标签页和跨框架元素截图需要在扩展弹窗里授予后重试。'
-          : (clip ? '元素截图不支持退避方案，已返回可视区域整屏' : undefined),
-        dataUrl
+        via: 'cdp',
+        selector: task.selector || null,
+        fullPage: !!task.full,
+        dataUrl: cdp.dataUrl
       }
     };
-  } catch (e2) {
-    if (notGranted) {
-      return { ...notGranted, url: tab.url };
+  } catch (e) {
+    const message = String(e && e.message ? e.message : e);
+
+    // 退避：CDP 不可用时改用扩展自带截屏，但它只能截当前可见标签页
+    if (!tab.active) {
+      return {
+        ok: false,
+        error: 'capture_failed',
+        url: tab.url,
+        message,
+        hint: 'CDP 截屏失败且该标签页不是激活状态（扩展自带截屏只能截当前可见标签页）。'
+          + '可先关掉该标签页的 DevTools，或让该页面在前台后重试。'
+      };
     }
-    return {
-      ok: false,
-      error: 'capture_failed',
-      url: tab.url,
-      message: String(e2 && e2.message ? e2.message : e2),
-      cdpMessage
-    };
+    try {
+      const dataUrl = await withTimeout(
+        chrome.tabs.captureVisibleTab(tab.windowId, { format }),
+        15000
+      );
+      return {
+        ok: true,
+        data: {
+          tabId: tab.id,
+          url: tab.url,
+          width: tab.width || null,
+          height: tab.height || null,
+          format,
+          via: 'captureVisibleTab',
+          selector: null,
+          fullPage: false,
+          note: clip ? '元素截图不支持退避方案，已返回可视区域整屏' : undefined,
+          dataUrl
+        }
+      };
+    } catch (e2) {
+      return {
+        ok: false,
+        error: 'capture_failed',
+        url: tab.url,
+        message: String(e2 && e2.message ? e2.message : e2),
+        cdpMessage: message
+      };
+    }
   }
 }

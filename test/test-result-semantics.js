@@ -279,8 +279,7 @@ function need(name) {
   console.log('\n[6] grabTab：下载结果');
   {
     const src = need('grabTab');
-    const makeGrab = (downloadItem, extensionDownload, opts) => {
-      const o = opts || {};
+    const makeGrab = (downloadItem, extensionDownload) => {
       const created = [];
       const chrome = {
         downloads: {
@@ -305,7 +304,7 @@ function need(name) {
         }
       };
       return new Function(
-        'chrome', 'resolveTab', 'withTimeout', 'tabUnresponsive', 'filenameFromUrl', 'withMediaSubdir', 'advancedNotGranted',
+        'chrome', 'resolveTab', 'withTimeout', 'tabUnresponsive', 'filenameFromUrl', 'withMediaSubdir',
         src + '\nreturn grabTab;'
       )(
         chrome,
@@ -313,10 +312,7 @@ function need(name) {
         (p) => p,
         () => ({ ok: false, error: 'tab_unresponsive' }),
         () => 'f.bin',
-        (n) => 'videos/' + n,
-        async () => (o.granted === false
-          ? { ok: false, error: 'advanced_not_granted', hint: 'grant' }
-          : null)
+        (n) => 'videos/' + n
       );
     };
 
@@ -395,23 +391,20 @@ function need(name) {
   {
     const src = need('screenshotTab');
     let calls = [];
-    const makeShot = (rect, opts) => {
-      const o = opts || { granted: true };
+    const makeShot = (rect) => {
       calls = [];
-      const chromeStub = o.chrome || { tabs: {} };
       return new Function(
-        'chrome', 'resolveTab', 'ensureInjectable', 'elementRectInMainFrame', 'elementRectByCdp', 'captureByCdp', 'withTimeout', 'tabUnresponsive', 'advancedNotGranted',
+        'chrome', 'resolveTab', 'ensureInjectable', 'elementRectInMainFrame', 'elementRectByCdp', 'captureByCdp', 'withTimeout', 'tabUnresponsive',
         src + '\nreturn screenshotTab;'
       )(
-        chromeStub,
-        async () => ({ id: 2, active: o.active !== false, url: 'https://e.test/p', title: 't', width: 800, height: 600, windowId: 1 }),
+        { tabs: {} },
+        async () => ({ id: 2, active: true, url: 'https://e.test/p', title: 't', width: 800, height: 600, windowId: 1 }),
         async () => ({}),
         async (tabId, selector) => { calls.push(['main', selector]); return rect; },
         async (tabId, selector, frameId) => { calls.push(['cdp', selector, frameId]); return rect; },
         async () => ({ dataUrl: 'data:image/png;base64,AAA', width: 10, height: 10 }),
         (p) => p,
-        () => ({ ok: false, error: 'tab_unresponsive' }),
-        async () => (o.granted ? null : { ok: false, error: 'advanced_not_granted', hint: 'grant' })
+        () => ({ ok: false, error: 'tab_unresponsive' })
       );
     };
     const rect = { x: 1, y: 2, width: 3, height: 4, scale: 1 };
@@ -431,116 +424,6 @@ function need(name) {
       miss.ok === false && miss.error === 'element_not_found', JSON.stringify(miss).slice(0, 160));
     check('报错时提示用 frames 查 frameId',
       typeof miss.hint === 'string' && miss.hint.includes('frames'), String(miss.hint));
-  }
-
-  /* ================================================================ *
-   * 9. 增强权限门禁：debugger 未授予时，相关动作报可理解的错误
-   *
-   * debugger 从必需权限降为可选权限后，upload / grab / screenshot 的
-   * CDP 通道在首次使用前是关着的。门禁的职责：
-   *   - 未授予时报 advanced_not_granted（带引导），而不是抛出
-   *     "Cannot attach to this target" 这类无法理解的错误；
-   *   - 授予后路径与原来完全一致；
-   *   - 权限 API 缺席（老内核、替身）时放行，保持旧行为。
-   * ================================================================ */
-  console.log('\n[9] advancedNotGranted：增强权限门禁');
-  {
-    const gateSrc = need('advancedNotGranted');
-    const makeGate = (chromeStub) => new Function('chrome', gateSrc + '\nreturn advancedNotGranted;')(chromeStub);
-
-    const denied = await makeGate({ permissions: { contains: async () => false } })();
-    check('未授予时报 advanced_not_granted 且带引导',
-      denied && denied.error === 'advanced_not_granted' && typeof denied.hint === 'string' && denied.hint.includes('授予'),
-      JSON.stringify(denied));
-
-    const granted = await makeGate({ permissions: { contains: async () => true } })();
-    check('已授予返回 null', granted === null, JSON.stringify(granted));
-
-    const noApi = await makeGate({})();
-    check('权限 API 缺席时放行（保持旧行为）', noApi === null, JSON.stringify(noApi));
-
-    const throwing = await makeGate({ permissions: { contains: async () => { throw new Error('boom'); } } })();
-    check('权限 API 抛错时放行而不是崩', throwing === null, JSON.stringify(throwing));
-
-    // uploadTab：未授予时不碰 debugger
-    {
-      const uploadSrc = need('uploadTab');
-      let attachCalled = false;
-      const r = await new Function(
-        'chrome', 'resolveTab', 'advancedNotGranted', uploadSrc + '\nreturn uploadTab;'
-      )(
-        { debugger: { attach: async () => { attachCalled = true; } } },
-        async () => ({ id: 1, url: 'https://e.test/p' }),
-        async () => ({ ok: false, error: 'advanced_not_granted', hint: 'grant' })
-      )({ files: ['D:\\x.bin'] });
-      check('upload 未授予时报门禁错误', r.ok === false && r.error === 'advanced_not_granted', JSON.stringify(r));
-      check('upload 未授予时没碰调试器', attachCalled === false, String(attachCalled));
-    }
-
-    // grabTab：未授予时不碰 debugger
-    {
-      const grabSrc = need('grabTab');
-      let attachCalled = false;
-      const r = await new Function(
-        'chrome', 'resolveTab', 'withTimeout', 'tabUnresponsive', 'filenameFromUrl', 'withMediaSubdir', 'advancedNotGranted',
-        grabSrc + '\nreturn grabTab;'
-      )(
-        { debugger: { attach: async () => { attachCalled = true; } } },
-        async () => ({ id: 3, url: 'https://e.test/page' }),
-        (p) => p,
-        () => ({ ok: false, error: 'tab_unresponsive' }),
-        () => 'f.bin',
-        (n) => 'videos/' + n,
-        async () => ({ ok: false, error: 'advanced_not_granted', hint: 'grant' })
-      )({ url: 'https://e.test/a.mp4', match: 'e.test' });
-      check('grab 未授予时报门禁错误',
-        r.ok === false && r.error === 'advanced_not_granted' && r.url === 'https://e.test/a.mp4',
-        JSON.stringify(r));
-      check('grab 未授予时没碰调试器', attachCalled === false, String(attachCalled));
-    }
-
-    // screenshotTab：未授予 + 前台 → 退避自带截屏；后台 → 直接报门禁
-    {
-      const shotSrc = need('screenshotTab');
-      const makeGatedShot = (granted, active, chromeStub) => new Function(
-        'chrome', 'resolveTab', 'ensureInjectable', 'elementRectInMainFrame', 'elementRectByCdp', 'captureByCdp', 'withTimeout', 'tabUnresponsive', 'advancedNotGranted',
-        shotSrc + '\nreturn screenshotTab;'
-      )(
-        chromeStub,
-        async () => ({ id: 2, active, url: 'https://e.test/p', title: 't', width: 800, height: 600, windowId: 1 }),
-        async () => ({}),
-        async () => null,
-        async () => null,
-        async () => ({ dataUrl: 'data:image/png;base64,AAA', width: 10, height: 10 }),
-        (p) => p,
-        () => ({ ok: false, error: 'tab_unresponsive' }),
-        async () => (granted ? null : { ok: false, error: 'advanced_not_granted', hint: 'grant' })
-      );
-
-      const activeShot = await makeGatedShot(false, true, {
-        tabs: { captureVisibleTab: async () => 'data:image/png;base64,AAA' }
-      })({});
-      check('未授予 + 前台页面退避自带截屏成功',
-        activeShot.ok === true && activeShot.data.via === 'captureVisibleTab'
-          && typeof activeShot.data.note === 'string' && activeShot.data.note.includes('退避'),
-        JSON.stringify(activeShot).slice(0, 200));
-
-      const inactiveShot = await makeGatedShot(false, false, { tabs: {} })({});
-      check('未授予 + 后台标签页报门禁错误',
-        inactiveShot.ok === false && inactiveShot.error === 'advanced_not_granted',
-        JSON.stringify(inactiveShot));
-
-      // 未授予时量不出子框架元素：要求先授权，而不是误导性的 element_not_found
-      const frameShot = await makeGatedShot(false, false, { tabs: {} })({ selector: '#x', frameId: 3 });
-      check('未授予 + 子框架元素报门禁错误而不是 element_not_found',
-        frameShot.ok === false && frameShot.error === 'advanced_not_granted', JSON.stringify(frameShot));
-
-      // 授予后走 CDP，与原来一致（captureByCdp 是注入的替身，能看到 via=cdp 即可）
-      const grantedShot = await makeGatedShot(true, false, { tabs: {} })({});
-      check('授予后走 CDP（后台标签页也能截）',
-        grantedShot.ok === true && grantedShot.data.via === 'cdp',
-        JSON.stringify(grantedShot).slice(0, 160));
-    }
   }
 
   console.log(`\n通过 ${pass}，失败 ${fail}`);

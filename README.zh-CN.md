@@ -106,12 +106,12 @@ sequenceDiagram
 | `navigate` | 在后台标签页打开地址；等待导航真正提交 |
 | `wait` | 等待元素/文字出现消失、URL 包含子串、元素数量达标、网络空闲 |
 | `eval` | 在页面里执行 JavaScript 并取回结果 |
-| `screenshot` | 元素、整页或后台标签页截图（这三个深度**可选权限**）；前台可视区域截图不需要 |
+| `screenshot` | 元素、整页或后台标签页截图 |
 | `media` | 列出页面里所有媒体候选（视频、流清单、图片、音频） |
 | `save` | 走浏览器下载栈把地址保存到磁盘 |
-| `grab` | 保存那些「有防盗链 **且** 拒绝跨域」的 CDN 上的媒体（**可选权限**） |
+| `grab` | 保存那些「有防盗链 **且** 拒绝跨域」的 CDN 上的媒体 |
 | `download` | 带页面登录态取回地址内容，把字节交给你 |
-| `upload` | 把本地文件填进文件选择框（**可选权限**） |
+| `upload` | 把本地文件填进文件选择框 |
 | `session` | 读取标签页的 Cookie 与站点存储（**可选权限**） |
 | `tabs` `mark` `unmark` `close` `activate` | 标签页管理，以及「agent 正在操作」的可见标记 |
 | `frames` | 诊断编辑器在哪个框架、以何种方式可编辑 |
@@ -145,9 +145,8 @@ Chrome 与 Edge 可同时使用，彼此完全隔离，且自动选路。
 - Node.js 18 或更高版本。桥接服务没有第三方依赖，`node src/server.js` 就是全部运行环境。
 - Chrome、Edge 或其他 Chromium 内核浏览器。
 
-扩展从源码加载。必需权限只有 `tabs`、`scripting` 这类基础项，风险最高的 `debugger` 是可选的、
-默认关闭；运行时代码执行和站点访问两条还在，所以 Chrome 不上架。Edge Add-ons 免费上架的
-材料在 `docs/STORE.md`。
+扩展从源码加载，没有商店版本。它需要 `debugger` 权限、会执行本机程序在运行时传入的代码、
+还要求站点访问权限。这几条放在一起，会被商店审核判为远程代码执行与远程控制。
 
 **1. 启动桥接服务**
 
@@ -175,29 +174,20 @@ npm i -g @hhhwdt/agent-browser-bridge  # 包发布之后，从 registry 装是�
 
 **2. 加载扩展**
 
-- Edge（推荐）：运行 `node src/setup.js --install`，桌面会生成「Agent Browser Bridge (Edge)」
-  快捷方式，从这个入口启动的 Edge 自带扩展，用的是你原来的 profile。Edge 已在运行时它不生效，
-  先完全退出再从快捷方式进；从普通图标启动的 Edge 没有扩展，属预期。
-- 手动加载：`edge://extensions` → 开启**开发人员模式** → **加载解压缩的扩展** → 选 `extension/`
 - Chrome：`chrome://extensions` → 开启**开发人员模式** → **加载已解压的扩展程序** → 选 `extension/`
+- Edge：`edge://extensions` → 开启**开发人员模式** → **加载解压缩的扩展** → 选 `extension/`
 
 **3. 授予站点权限**
 
 默认不授权任何站点。点扩展图标，逐个授权你要它操作的站点，或一次性授权全部。权限由浏览器
 自身的提示框确认，控制权在你手上。
 
-**3b. 可选权限（按需，不是必须）**
-
-弹窗「可选权限」区默认全关。`session` 需要 `cookies`；`upload`、`grab` 和整页/后台/跨框架元素
-截图需要 `debugger`。用到时点一次**授予**，不用就一直关着。未授予时对应动作返回
-`advanced_not_granted` 并提示这里。
-
 > **从 1.4.x 升级：** 清单里现在带了一个公钥，扩展 ID 因此被固定。你现有的安装重载后会换成新
 > ID，而站点授权是绑在旧 ID 上的，需要重新授权一遍。到 `chrome://extensions`（或
 > `edge://extensions`）检查有没有旧 ID 的残留条目，有就删掉。想确认服务端和扩展对得上，跑
 > `node src/cli.js diag` 看 `extensionId`，与 `/health` 里的 `allowedExtensionIds` 比对。
 
-**3c. 粘贴桥接 token**
+**3b. 粘贴桥接 token**
 
 桥接服务首次启动时会生成 token。扩展需要它来证明身份。
 
@@ -211,21 +201,21 @@ npm i -g @hhhwdt/agent-browser-bridge  # 包发布之后，从 registry 装是�
 
 ## 权限模型
 
-安装时的索取刻意保持最小：
+安装时的索取刻意保持最小。其中两处是 Chrome 的规则决定的，不是我们的选择：
 
 | 权限 | 状态 | 用途与原因 |
 |---|---|---|
 | `tabs` `scripting` `storage` `alarms` | 必需 | 核心能力：找标签页、注入脚本、维持连接 |
-| `downloads` | 必需 | 支撑 `save` 与 `grab` |
-| `debugger` | **可选** | 支撑 `upload`、CDP 截图与 `grab` 的防盗链拦截。弹窗里点一次「授予」才申请；未授予时这三个动作返回 `advanced_not_granted` 并提示去哪授权。附加调试器期间浏览器顶部有提示条，属正常现象 |
+| `debugger` | **必需** | 支撑 `upload`、CDP 截图与 `grab`。Chrome **禁止**它作为可选权限：写成可选会被直接丢弃并在扩展页报错，所以只能是必需 |
+| `downloads` | **必需** | 支撑 `save` 与 `grab` |
 | `cookies` | **可选** | 支撑 `session`。只有你在弹窗里点「授予」才会申请；在此之前 `session` 返回 `permission_not_granted`。注意范围：授予后对**所有**已打开标签页的 Cookie 生效，不止你授权过的站点 |
 | 站点访问（`*://*/*`） | **可选** | 由弹窗逐站授予，安装时绝不索取 |
 
 桥接服务还会在配置目录生成一个 token 文件（`%APPDATA%\agent-browser-bridge\token` 或
 `~/.config/agent-browser-bridge/token`），扩展凭此证明身份。其他扩展无法读取该文件。
 
-点过「授予」以后想收回，在弹窗「可选权限」区点「撤销」；收回后相关动作回到上面的提示状态。
-不想用这三类动作的，一直不授予就行，其余功能不依赖它。
+如果你不想把 `debugger` 交出去，删掉 `upload`、`screenshot`、`grab` 三个动作即可，其他功能
+不依赖它。
 
 ## 给 agent 用（MCP）
 
@@ -509,7 +499,8 @@ agent 碰过的每个标签页都会被打标记，两种形式：
 - 桥接服务要求 `X-ABB-Token` 请求头，扩展从 `chrome.storage.local` 读取 token（在弹窗里粘贴一次）。
   其他扩展无法读取 token 文件，无法驱动桥接。但同用户进程能从磁盘读取 token 文件。
   见 [SECURITY.md](docs/SECURITY.md)。
-- 高权限能力被拆开：`cookies` 和 `debugger` 都是可选的，未在弹窗中授予前一律关闭；站点访问逐站授予。
+- 高权限能力被拆开：`cookies` 是可选的，未在弹窗中授予前一律关闭；依赖 `debugger` 的动作之所以
+  声明为必需，只是因为 Chrome 不允许另一种写法。
 - 读操作没有副作用。写操作按风险分级，并把实际点击/输入的内容回报给调用方。
 - 无遥测、无外部网络请求。所有对外请求都是**你要求发起的**：`download` 用标签页登录态取你给的
   地址，`grab` 取你给的媒体地址，`eval` 执行你给的代码。

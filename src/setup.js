@@ -202,85 +202,8 @@ function checkGrants(info) {
   }
   if (!AS_JSON) {
     console.log(`        （cookies 权限：${info.cookiesGranted ? '已授予，session 可用' : '未授予，只有 session 需要它'}）`);
-    console.log(`        （debugger 权限：${info.debuggerGranted ? '已授予，upload / grab / screenshot 全功能可用' : '未授予，upload / grab / screenshot 首次使用需在弹窗授予'}）`);
   }
   return true;
-}
-
-/* ------------------------------------------------------------------ *
- * 4.1 Edge 启动器（可选；仅 Windows）
- *
- * Chrome 从 137 起忽略 --load-extension，Branded Edge 仍认。给 Edge 用户一条
- * 全自动装扩展的路：生成一个带 --load-extension 参数的桌面快捷方式，用户从
- * 这个入口启动 Edge，用的就是他自己的默认 profile（书签、登录态都在），
- * 扩展每次随启动自动挂载，不需要商店也不需要开发者模式手动加载。
- *
- * 但参数挂载的扩展不驻留 profile——下次不带参数启动就没有了。因此这个
- * 快捷方式就是日常入口，普通图标进不来。Edge 已在运行时再启动会并入
- * 既有进程，参数被丢掉，所以必须先完全退出 Edge。
- *
- * 只在 --install 下才写（往桌面放快捷方式是一次写入），默认只报告。
- * ------------------------------------------------------------------ */
-function checkEdgeLauncher() {
-  if (process.platform !== 'win32') {
-    layer('Edge 启动器', 'ok', '仅 Windows 提供（macOS / Linux 无此问题）');
-    return;
-  }
-
-  const candidates = [
-    path.join(process.env['ProgramFiles(x86)'] || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    path.join(process.env.ProgramFiles || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe')
-  ];
-  const edgeExe = candidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
-  if (!edgeExe) {
-    layer('Edge 启动器', 'todo', '未找到 Edge，跳过（用 Chrome 的话手动加载扩展）');
-    return;
-  }
-
-  let desktop;
-  try {
-    desktop = spawnSync('powershell', ['-NoProfile', '-Command',
-      '[Environment]::GetFolderPath(\'Desktop\')'], { encoding: 'utf8' }).stdout.trim();
-  } catch (e) { /* 下面统一处理 */ }
-  if (!desktop) {
-    layer('Edge 启动器', 'todo', '拿不到桌面路径，跳过');
-    return;
-  }
-
-  const lnk = path.join(desktop, 'Agent Browser Bridge (Edge).lnk');
-  if (fs.existsSync(lnk)) {
-    layer('Edge 启动器', 'ok', lnk);
-    return;
-  }
-
-  if (!INSTALL) {
-    layer('Edge 启动器', 'todo', '还没生成 Edge 启动快捷方式（自动挂载扩展的入口）',
-      'node ' + path.join(__dirname, 'setup.js') + ' --install  会生成；或按传统方式手动加载扩展');
-    return;
-  }
-
-  // WScript.Shell 是 Windows 内建 COM，生成 .lnk 不需要第三方依赖
-  const q = (s) => "'" + String(s).split("'").join("''") + "'";   // PS 单引号转义
-  const argsArg = '--load-extension="' + EXT_DIR + '"';
-  const cmd = [
-    '$s = (New-Object -ComObject WScript.Shell).CreateShortcut(' + q(lnk) + ')',
-    '$s.TargetPath = ' + q(edgeExe),
-    '$s.Arguments = ' + q(argsArg),
-    "$s.Description = 'Agent Browser Bridge Edge'",
-    '$s.Save()'
-  ].join('; ');
-  const r = spawnSync('powershell', ['-NoProfile', '-Command', cmd], { encoding: 'utf8' });
-  if (r.status !== 0 || !fs.existsSync(lnk)) {
-    layer('Edge 启动器', 'fail', '快捷方式创建失败',
-      '手动加载扩展（edge://extensions → 开发者模式）也完全可用');
-    return;
-  }
-  layer('Edge 启动器', 'ok', '已生成 ' + lnk);
-  console.log('');
-  console.log('     使用方式（重要）：');
-  console.log('       - 以后从这个快捷方式启动 Edge，扩展就自动在（用的是你原来的 profile）');
-  console.log('       - Edge 已在运行时点它不会生效，先全部退出 Edge 再从快捷方式进');
-  console.log('       - 从普通图标启动的 Edge 没有扩展，属预期');
 }
 
 /* ------------------------------------------------------------------ *
@@ -408,7 +331,6 @@ function checkMcp() {
   else { layer('端到端冒烟', 'todo', '扩展未连接，跳过', '先加载扩展，再运行 node setup.js'); }
 
   checkMcp();
-  checkEdgeLauncher();
 
   const failed = layers.filter((l) => l.state === 'fail');
   const todo = layers.filter((l) => l.state === 'todo');

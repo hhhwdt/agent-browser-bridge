@@ -20,7 +20,7 @@
  *   POST /click  /type    /key   /navigate /eval   交互类
  *   POST /save   /grab    /download   /upload      文件类
  *   POST /session                         站点 Cookie 与存储（需 cookies 可选权限）
- *   POST /screenshot                      截图（整页/后台/元素走 debugger，可选权限）
+ *   POST /screenshot                      截图（走 debugger）
  *   POST /wait   /frames  /diag           同步与诊断
  *   POST /mark   /unmark  /activate /close /reload  标签页与扩展管理
  *   GET  /poll   /result                  扩展专用（长轮询与回传）

@@ -6,7 +6,7 @@
  */
 
 import { fetchInPage } from './inject-media.js';
-import { advancedNotGranted, ensureInjectable, injectAndPick, resolveTab, withTimeout } from './guards.js';
+import { ensureInjectable, injectAndPick, resolveTab, withTimeout } from './guards.js';
 
 export async function uploadTab(task) {
   const tab = await resolveTab(task);
@@ -20,11 +20,6 @@ export async function uploadTab(task) {
 
   const selector = task.selector || 'input[type=file]';
   const target = { tabId: tab.id };
-
-  const notGranted = await advancedNotGranted();
-  if (notGranted) {
-    return { ...notGranted, url: tab.url };
-  }
 
   try {
     await chrome.debugger.attach(target, '1.3');
@@ -89,11 +84,6 @@ export async function grabTab(task) {
   let pattern;
   try { pattern = new URL(task.url).origin + '/*'; }
   catch (e) { return { ok: false, error: 'bad_url', url: task.url }; }
-
-  const notGranted = await advancedNotGranted();
-  if (notGranted) {
-    return { ...notGranted, url: task.url };
-  }
 
   const target = { tabId: tab.id };
   const targetKey = String(task.url).slice(0, 120);

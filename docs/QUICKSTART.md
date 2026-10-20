@@ -42,14 +42,10 @@ configuration.
 
 The extension appears with a puzzle-piece icon. Pin it to the toolbar if you like.
 
-> Edge can skip the manual load: run `node src/setup.js --install`. That creates a desktop shortcut
-> that starts Edge with `--load-extension`, using your default profile. One condition: it has no
-> effect while Edge is running — quit Edge fully, then start from the shortcut. For Chrome the
-> manual way above is the only way.
->
-> There is no Chrome Web Store listing: code execution at run time plus site access is a combination
-> store review rejects. Edge Add-ons is free and planned; the material is in `docs/STORE.md`.
-> Loading unpacked has no trust restriction on either browser.
+> There is no extension-store listing, and there will not be one: the tool needs the `debugger`
+> permission, runs code that a local program supplies at runtime, and asks for site access, a
+> combination store policies treat as remote code execution and remote control. Loading unpacked is
+> the supported path.
 
 ## 4. Grant the sites you want it to work on
 
@@ -59,10 +55,8 @@ because the browser requires a real click from you.
 - Type a hostname (e.g. `confluence.example.com`) and press **授权 / Grant**, or
 - Press **授权所有站点 / Grant all sites** if you would rather not repeat this.
 
-Optional: two things live behind the **授予 / Grant** button in "optional permissions" — `cookies`
-(the `session` tool, reading cookies and web storage) and `debugger` (upload, grab, and
-background / full-page / cross-frame element screenshots). The first use of either returns
-`advanced_not_granted` with a pointer back here. Leave both off if you do not need them.
+Optional: if you need the `session` tool (reading cookies and web storage), press **授予 / Grant** in
+the "optional permissions" row. Leave it off otherwise.
 
 ## 5. Paste the bridge token
 
@@ -136,7 +130,6 @@ node src/cli.js diag            # extension version, id, connection, recent erro
 | `extension_not_connected` | The extension is not loaded, or is loaded in a different browser profile. |
 | `permission_denied` | That site was never granted. Step 3. |
 | `permission_not_granted` | The `session` tool needs the optional `cookies` permission. |
-| `advanced_not_granted` | `upload`, `grab` and the CDP screenshots need the optional `debugger` permission. Grant both in the popup's "optional permissions" row, once. |
 | `token_required` | The bridge is running but the extension has no token. Paste the token into the popup (step 5). |
 | `tab_unresponsive` | That tab's renderer is frozen. Run `activate` then retry, or use `--auto-activate`. |
 | Everything times out | Check `node src/cli.js diag` first; most often the wrong browser or a dead extension. |
@@ -173,9 +166,10 @@ Then have them run `node src/setup.js`: it checks all four layers and names the 
 
 Two things worth saying up front, because both surprise people:
 
-- **One store path, for Edge only.** Chrome nags about developer-mode extensions at every start, and
-  Chrome Web Store is blocked by the run-time-code-plus-site-access combination. Edge Add-ons is
-  free and planned; the material is in `docs/STORE.md`.
+- **The extension is not in a store, and will not be.** Chrome nags about developer-mode extensions
+  at every start. That is the price of the `debugger` permission plus executing code a local program
+  supplies at run time, a combination store review treats as remote code execution and remote
+  control.
 - **It drives their real, logged-in browser.** Anything they are signed into is reachable by whatever
   local program can reach the bridge port. [DISCLAIMER.md](DISCLAIMER.md) is short; send it along.
 

@@ -111,12 +111,12 @@ the one you are looking at — which is the whole point.
 | `navigate` | Open a URL in a background tab; waits for the navigation to commit |
 | `wait` | Wait for an element or text to appear or disappear |
 | `eval` | Run JavaScript in the page and return the result |
-| `screenshot` | Element, full-page, or background-tab capture *(opt-in permission)*; the visible-area capture of the active tab needs no opt-in |
+| `screenshot` | Element, full-page, or background-tab capture |
 | `media` | List every media candidate on a page (video, streams, images, audio) |
 | `save` | Save a URL to disk through the browser's download stack |
-| `grab` | Save media from CDNs that are hotlink-protected *and* refuse CORS *(opt-in permission)* |
+| `grab` | Save media from CDNs that are hotlink-protected *and* refuse CORS |
 | `download` | Fetch a URL with the page's login state and hand you the bytes |
-| `upload` | Put local files into a file input *(opt-in permission)* |
+| `upload` | Put local files into a file input |
 | `session` | Read the tab's cookies and web storage *(opt-in permission)* |
 | `tabs` `mark` `unmark` `close` `activate` | Tab management, plus a visible "agent is working here" marker |
 | `frames` | Diagnose which frame holds the editor, and how it is editable |
@@ -147,10 +147,9 @@ The bridge works fine without them; they are for the download use case.
 - Node.js 18 or newer. The bridge has no dependencies; `node src/server.js` is the whole runtime.
 - Chrome, Edge, or another Chromium browser.
 
-The extension is loaded from source. Only basic permissions (`tabs`, `scripting` and such) are
-required; the riskiest one, `debugger`, is optional and off by default. Run-time code execution and
-site access remain, so there is still no Chrome Web Store listing. The free Edge Add-ons route is
-written up in `docs/STORE.md`.
+The extension is loaded from source. There is no extension-store listing: this tool needs the
+`debugger` permission, executes code that a local program supplies at run time, and asks for site
+access, a combination store review policies treat as remote code execution and remote control.
 
 **1. Start the bridge**
 
@@ -179,25 +178,14 @@ so the self-check prints the folder to load in step 2; no clone needed on the ma
 
 **2. Load the extension**
 
-- Edge (recommended): run `node src/setup.js --install`. That puts an "Agent Browser Bridge (Edge)"
-  shortcut on your desktop; Edge started from it carries the extension and uses your default
-  profile. It has no effect while Edge is running — quit Edge fully first, then start from the
-  shortcut. Edge started from a normal icon has no extension; that is expected.
-- Manually: `edge://extensions` → enable **Developer mode** → **Load unpacked** → pick `extension/`
 - Chrome: `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick `extension/`
+- Edge: `edge://extensions` → enable **Developer mode** → **Load unpacked** → pick `extension/`
 
 **3. Grant site access**
 
 Nothing is authorised by default. Click the extension icon and grant the sites you want it to work
 on, one hostname at a time or all sites. The browser's own permission prompt is what enforces
 this, so you stay in control.
-
-**3b. Optional permissions (as needed, not required)**
-
-The "optional permissions" row in the popup starts all-off. `session` needs `cookies`; `upload`,
-`grab` and the full-page / background-tab / cross-frame element screenshots need `debugger`. Press
-**Grant** once when you first need them; leave them off otherwise. Actions that need an ungranted
-permission return `advanced_not_granted` and point here.
 
 > **Upgrading from 1.4.x:** the manifest now carries a public key, which fixes the extension ID.
 > Your existing install gets a new ID on reload, and site grants are tied to the old one, so they
@@ -207,19 +195,19 @@ permission return `advanced_not_granted` and point here.
 
 ## Permissions
 
-The install prompt stays small on purpose:
+The install prompt stays small on purpose. Two things are worth knowing, because Chrome's own rules
+decided them for us:
 
 | Permission | State | Why |
 |---|---|---|
 | `tabs` `scripting` `storage` `alarms` | required | the core: find tabs, inject, keep the connection alive |
-| `downloads` | required | powers `save` and `grab` |
-| `debugger` | **optional** | powers `upload`, CDP screenshots and the CORS rewrite inside `grab`. Requested only when you press the button in the popup; until then those three actions return `advanced_not_granted` and point you there. While the debugger is attached the browser shows a bar at the top — that is normal |
+| `debugger` | **required** | powers `upload`, CDP screenshots and `grab`. Chrome **forbids** this one being optional — declaring it optional makes Chrome drop it and the install logs an error, so it has to be required |
+| `downloads` | **required** | powers `save` and `grab` |
 | `cookies` | **optional** | powers `session`. Requested only when you press the button in the popup; until then `session` returns `permission_not_granted`. Note the scope: once granted it covers cookies on **every** open tab, not only the sites you authorised |
 | host access (`*://*/*`) | **optional** | granted per site from the popup, never at install time |
 
-Press **Revoke** in the popup to take a granted permission back; the actions then go back to the
-message above. If you never want these three actions, simply never grant; nothing else depends on
-it.
+If you would rather not hand over `debugger`, delete `upload`, `screenshot` and `grab`; nothing
+else depends on it.
 
 ## Use it from an agent (MCP)
 
@@ -525,8 +513,8 @@ something in practice:
   from `chrome.storage.local` (pasted in the popup once). A second extension cannot read the token
   file, so it cannot drive the bridge. A same-user process can read the token from disk. See
   [SECURITY.md](docs/SECURITY.md) for the trust boundary.
-- Privileged capabilities are separated: `cookies` and `debugger` are opt-in and off until granted
-  from the popup; site access is granted per site.
+- Privileged capabilities are separated: `cookies` is opt-in and off until granted from the popup;
+  `debugger`-backed actions are declared required only because Chrome forbids the alternative.
 - Read operations have no side effects. Write operations are risk-classified, and the caller is told
   what was actually clicked or typed.
 - No telemetry and no external network calls. The only outbound requests are the ones *you* ask for:

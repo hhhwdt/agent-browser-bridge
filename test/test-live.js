@@ -146,19 +146,9 @@ function startFileServer() {
     const ret = await ab.evalPage({ tabId, code: 'return document.title' });
     check('return 风格取到值', ret.value === expr.value, ret.value);
 
-    console.log('\n[9] screenshot');
-    const shot = await ab.screenshot({ tabId, full: true }).catch((e) => ({ _threw: e }));
-    if (shot._threw) {
-      // 1.9.0 起 debugger 是可选权限，CI 的全新 profile 点不了弹窗，只能到这一步。
-      // 这里钉住门禁契约：整个失败对象必须是明确的 advanced_not_granted（带引导），
-      // 而不是 attach 失败之类的原始错误；截图本体在有授权的环境里验。
-      check('未授予时报 advanced_not_granted 而不是原始 attach 错误',
-        shot._threw.code === 'advanced_not_granted',
-        { code: shot._threw.code, message: shot._threw.message });
-      console.log('     CI 无法授权门禁：整页/可视截图留给本地有授予的环境验');
-    } else {
-      check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { via: shot.via });
-    }
+    console.log('\n[9] screenshot：整页截图走 CDP');
+    const shot = await ab.screenshot({ tabId, full: true });
+    check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { via: shot.via });
 
     console.log('\n[10] download：2MB 文件（结果体约 2.7MB，旧版 1MB 上限会掐断连接）');
     const port = await startFileServer();

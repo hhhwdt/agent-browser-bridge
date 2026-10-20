@@ -8,28 +8,6 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
-## [Unreleased]
-
-### Changed
-
-- `debugger` is now an optional permission, off by default. Shipped extensions stay lighter at
-  install time, which also makes a free Edge Add-ons listing workable. `upload`, `grab` and the CDP
-  screenshots require it; without the grant they return `advanced_not_granted` with a pointer to
-  the popup instead of an opaque attach failure. A plain screenshot of the visible area of the
-  active tab still works without the grant (it never needed the debugger). Grant or revoke in the
-  popup's "optional permissions" row; the popup shows both `cookies` and `debugger` there.
-- `diag` now reports `debuggerGranted`, and `agent-browser-bridge-setup` prints its state next to
-  the cookies line.
-
-### Added
-
-- Edge launcher: `agent-browser-bridge-setup --install` creates an "Agent Browser Bridge (Edge)"
-  desktop shortcut that starts Edge with `--load-extension`, mounting the extension on the user's
-  default profile — no store, no developer-mode manual loading. Windows only; Chrome 137 ignores
-  the flag, so the manual path stays the way for Chrome users.
-- `docs/STORE.md` / `docs/STORE.zh-CN.md`: the Edge Add-ons submission package (listing text,
-  permission justifications, privacy policy links).
-
 ## [1.8.0] - 2026-10-20
 
 ### Added
