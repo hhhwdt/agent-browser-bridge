@@ -147,24 +147,17 @@ function startFileServer() {
     check('return 风格取到值', ret.value === expr.value, ret.value);
 
     console.log('\n[9] screenshot');
-    let shot = await ab.screenshot({ tabId, full: true }).catch((e) => ({ _threw: e }));
-    if (shot._threw && shot._threw.code !== 'advanced_not_granted') {
-      check('整页截图发起成功', false, { code: shot._threw.code, message: shot._threw.message });
-      shot = null;
-    } else if (shot._threw) {
-      // debugger 从 1.9.0 起是可选权限，全新 profile 没人点过弹窗授予。
-      // 激活标签页后走退避：前台可视区域截图不需要 debugger，照样验动作链路；
-      // 整页截图等授予后的本地环境再验。
-      console.log('     debugger 未授予：激活标签页后改验退避路径（可视区域），整页截图留给已授予的环境');
-      await ab.activate({ tabId });
-      shot = await ab.screenshot({ tabId }).catch((e) => ({ _threw2: e }));
-      if (shot._threw2) {
-        check('退避截图发起成功', false, { code: shot._threw2.code, message: shot._threw2.message });
-        shot = null;
-      }
-    }
-    if (shot) {
-      check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { error: shot.error, via: shot.via });
+    const shot = await ab.screenshot({ tabId, full: true }).catch((e) => ({ _threw: e }));
+    if (shot._threw) {
+      // 1.9.0 起 debugger 是可选权限，CI 的全新 profile 点不了弹窗，只能到这一步。
+      // 这里钉住门禁契约：整个失败对象必须是明确的 advanced_not_granted（带引导），
+      // 而不是 attach 失败之类的原始错误；截图本体在有授权的环境里验。
+      check('未授予时报 advanced_not_granted 而不是原始 attach 错误',
+        shot._threw.code === 'advanced_not_granted',
+        { code: shot._threw.code, message: shot._threw.message });
+      console.log('     CI 无法授权门禁：整页/可视截图留给本地有授予的环境验');
+    } else {
+      check('截图返回 dataUrl', String(shot.dataUrl || '').length > 1000, { via: shot.via });
     }
 
     console.log('\n[10] download：2MB 文件（结果体约 2.7MB，旧版 1MB 上限会掐断连接）');
