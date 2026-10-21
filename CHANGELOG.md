@@ -101,6 +101,10 @@ reconstructing them from the code alone would be guesswork.
   one, and the server's replacement close now carries the dedicated code 4420 ("a newer connection
   of your browser took over — do not reconnect") instead of a generic 1000. `test/test-ws.js` pins
   the 4420 code.
+- Release checks: `tools/check-package.js` only recognized npm 11's `pack --json` shape. npm 12
+  (pulled in by `npm install -g npm@latest` for Trusted Publishing) returns the same data keyed by
+  package name, so the job failed deterministically before publishing. The parser now accepts both
+  shapes and tolerates noise around the JSON document.
 - A queued task sent onto a WebSocket channel that had died in the seconds before its `onclose`
   cleanup was silently dropped (`flushTasks` only handled `throw`, but `sendTask` returns `false`
   in that state); it is now put back at the queue head and the channel is unregistered so the

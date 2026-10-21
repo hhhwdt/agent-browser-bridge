@@ -68,6 +68,48 @@ const FORBIDDEN = [
   /^node_modules\//
 ];
 
+/** 从 stdout 里提取第一个完整的 JSON 文档，容忍前导噪声与 JSON 之后的额外输出行。 */
+function extractJson(out) {
+  // 两个候选不能只按先解析成功的顺序取：npm 12 的外层是对象，但第一个 '['
+  // 属于内层的 files 数组，先按 '[' 解析会把"文件条目数组"当成包清单带回去，
+  // 后面取 entry.files 就成了空列表。这里要求解析结果长得像包清单才接受。
+  let fallback;
+  for (const open of ['[', '{']) {
+    const start = out.indexOf(open);
+    if (start < 0) { continue; }
+    // 括号配平找到结束位置（字符串内的引号与括号按字面处理）
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let i = start; i < out.length; i++) {
+      const c = out[i];
+      if (inStr) {
+        if (esc) { esc = false; }
+        else if (c === '\\') { esc = true; }
+        else if (c === '"') { inStr = false; }
+        continue;
+      }
+      if (c === '"') { inStr = true; continue; }
+      if (c === '[' || c === '{') { depth++; }
+      else if (c === ']' || c === '}') {
+        depth--;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    if (end < 0) { continue; }
+    let parsed;
+    try { parsed = JSON.parse(out.slice(start, end)); } catch (e) { continue; }
+    const looksLike = Array.isArray(parsed)
+      ? Boolean(parsed[0] && Array.isArray(parsed[0].files))
+      : Boolean(Array.isArray(parsed.files)
+        || Object.values(parsed).some((v) => v && Array.isArray(v.files)));
+    if (looksLike) { return parsed; }
+    fallback = fallback || parsed;
+  }
+  return fallback;
+}
+
 /** 跑一次 npm pack 的干运行，拿回文件清单（不落盘）。 */
 function packedFiles() {
   // Windows 上 .cmd 只能经 shell 执行；命令里没有外部输入，不存在拼接注入
@@ -79,20 +121,25 @@ function packedFiles() {
     process.exit(1);
   }
   const out = String(r.stdout || '');
-  const start = out.indexOf('[');
-  if (r.status !== 0 || start < 0) {
+  if (r.status !== 0 || (!out.includes('[') && !out.includes('{'))) {
     console.error('npm pack --dry-run --json 没有返回可解析的结果：');
     console.error(out.slice(0, 500) || String(r.stderr || '').slice(0, 500));
     process.exit(1);
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(out.slice(start));
-  } catch (e) {
-    console.error('解析 npm pack 的输出失败：' + e.message);
+  let parsed = extractJson(out);
+  if (r.status !== 0 || !parsed) {
+    console.error('npm pack --dry-run --json 没有返回可解析的结果：');
+    console.error(out.slice(0, 500) || String(r.stderr || '').slice(0, 500));
     process.exit(1);
   }
-  const entry = Array.isArray(parsed) ? parsed[0] : parsed;
+  // npm 11：结果数组 [ { files... } ]；npm 12 起（Trusted Publishing 升级后的
+  // npm@latest）：改成按包名键控的对象 { "<pkg>": { files... } }。两种形状都要
+  // 能取到 entry，否则 CI 上发布前置检查必然失败。
+  let entry = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (!entry || !Array.isArray(entry.files)) {
+    const values = Object.values(entry || {});
+    entry = values.find((v) => v && Array.isArray(v.files)) || entry;
+  }
   return (entry && entry.files ? entry.files : []).map((f) => f.path);
 }
 
