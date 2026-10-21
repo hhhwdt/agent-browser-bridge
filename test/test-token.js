@@ -90,8 +90,29 @@ function call(method, httpPath, body, token) {
     // Windows 上 mode 不可靠，只检查文件存在且可读
     check('token 文件可读', stat.isFile());
 
-    /* ---------- 6. --no-token 模式 ---------- */
-    // 已经在 test-server.js 里覆盖，这里不重复
+    /* ---------- 6. CLI 的 rotateToken 能生成下一把能用的钥匙 ---------- */
+    const { rotateToken } = require('../src/cli/commands/admin.js');
+    const rotated = rotateToken(tmpDir);
+    check('rotateToken 生成 64 字符 hex', /^[0-9a-f]{64}$/.test(rotated.token), rotated.token.slice(0, 8) + '…');
+    check('rotateToken 落盘内容与新 token 一致',
+      fs.readFileSync(path.join(tmpDir, 'token'), 'utf8').trim() === rotated.token
+        && rotated.file === path.join(tmpDir, 'token'));
+
+    // 轮换后重启指向同一份数据：旧 token 立刻失效，新 token 生效
+    const next = rotateToken(tmpDir);
+    check('连续轮换得到不同的新 token', next.token !== rotated.token);
+    server.kill();
+    await sleep(400);
+    const server2 = spawn(process.execPath, [SERVER, '--port', String(PORT), '--token-file', tokenFile], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    await sleep(1500);
+    const oldOk = await call('POST', '/read', { match: 'example.com' }, token);
+    check('轮换后旧 token 被拒', oldOk.status === 401, `status=${oldOk.status}`);
+    const newOk = await call('POST', '/read', { match: 'example.com' }, next.token);
+    check('轮换后新 token 通过', newOk.status !== 401, `status=${newOk.status}`);
+    server2.kill();
+    await sleep(300);
 
   } finally {
     server.kill();

@@ -6,7 +6,7 @@
 
 const { POLL_HOLD_MS, RESULT_MAX_BODY } = require('../config.js');
 const { sendJson, readJsonBody } = require('../http.js');
-const { normalizeBrowser, heldPolls, lastSeen, pending, flushTasks } = require('../queue.js');
+const { normalizeBrowser, heldPolls, lastSeen, flushTasks, recordResult } = require('../queue.js');
 
 async function routePoll(req, res, ctx) {
   // 这里**不能**靠 Origin 判断调用方是不是本扩展：扩展清单里有
@@ -50,24 +50,19 @@ async function routeResult(req, res, ctx) {
   const body = await readJsonBody(req, res, RESULT_MAX_BODY);
   if (!body) { return; }
 
-  const entry = pending.get(body.id);
-  if (entry) {
-    // 任务只会投给某一个浏览器，回传方必须与它一致。否则同机另一个浏览器
-    // 或本机任意进程只要猜到自增的 id，就能顶替别人去结算任务结果。
-    if (entry.browser && entry.browser !== browser) {
-      sendJson(res, 409, {
-        ok: false,
-        error: 'browser_mismatch',
-        expected: entry.browser,
-        actual: browser
-      }, req);
-      return;
-    }
-    clearTimeout(entry.timer);
-    pending.delete(body.id);
-    entry.resolve(body.result ?? { ok: false, error: 'empty_result' });
+  // 结算路径与 WS 的 result 上行共用（queue.recordResult），这里是它的 HTTP 形态：
+  // 409 提示回传方对不上预期的浏览器；noise（id 已失效）也是"接受了但不结算"。
+  const outcome = recordResult(browser, body.id, body.result);
+  if (outcome.mismatch) {
+    sendJson(res, 409, {
+      ok: false,
+      error: 'browser_mismatch',
+      expected: outcome.expected,
+      actual: browser
+    }, req);
+    return;
   }
-  sendJson(res, 200, { ok: true, accepted: !!entry }, req);
+  sendJson(res, 200, { ok: true, accepted: outcome.resolved }, req);
 }
 
 module.exports = { routePoll, routeResult };

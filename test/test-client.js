@@ -53,6 +53,39 @@ check('非可重复参数仍然后者覆盖', repeated.match === 'b', repeated.m
 check('布尔开关不受影响', repeated.links === true);
 
 /* ------------------------------------------------------------------ *
+ * client.action() 逃生口：路径与请求超时按注册表推导
+ * ------------------------------------------------------------------ */
+{
+  const { createClient: makeStub } = require('../src/client.js');
+  const stub = makeStub({});
+  const calls = [];
+  stub.request = async (method, urlPath, body, timeoutMs) => {
+    calls.push({ method, urlPath, body, timeoutMs });
+    return { status: 200, data: { ok: true, data: { stub: true } } };
+  };
+
+  try { stub.action('no_such_action', {}); check('未知动作名抛错', false); }
+  catch (e) { check('未知动作名抛错', /注册表里没有这个动作/.test(e.message), e.message); }
+
+  stub.action('read', { match: 'x', url: 'https://e.com' });
+  check('读 /read 的路径与请求体',
+    calls[0].method === 'POST' && calls[0].urlPath === '/read' && calls[0].body.match === 'x'
+      && calls[0].body.url === 'https://e.com', JSON.stringify(calls[0]));
+  // read 没有数字型标称（走默认超时），请求超时也留给默认值
+  check('默认超时型动作的请求超时留默认', calls[0].timeoutMs === undefined, JSON.stringify(calls[0]));
+
+  stub.action('grab', { match: 'x', url: 'https://cdn/e.m3u8' });
+  check('长动作（grab）按标称 190000 计算请求超时', calls[1].timeoutMs === 210000, String(calls[1].timeoutMs));
+
+  stub.action('wait', { match: 'x', timeoutMs: 8000 });
+  check('wait 动作按预算 + 5 秒余量', calls[2].timeoutMs === 13000, String(calls[2].timeoutMs));
+
+  stub.action('tabs', { browser: 'EDGE' });
+  check('/tabs 是 GET 且带 browser query（浏览器名归一化为小写）',
+    calls[3].method === 'GET' && calls[3].urlPath === '/tabs?browser=edge', JSON.stringify(calls[3]));
+}
+
+/* ------------------------------------------------------------------ *
  * client.js 的错误归类
  * ------------------------------------------------------------------ */
 const { createClient } = require('../src/client.js');

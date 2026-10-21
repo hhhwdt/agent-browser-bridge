@@ -62,6 +62,7 @@ function wsConnect(port, helloData) {
     const client = { frames: [], closed: null, closeCode: null, accept: null, onTask: null, ready: null, closedPromise: null };
 
     client.sendText = (str) => { socket.write(maskedFrame(0x1, Buffer.from(str, 'utf8'))); };
+    client.sendRaw = (buf) => { socket.write(buf); };
     client.close = () => { try { socket.write(maskedFrame(0x8, Buffer.alloc(0))); socket.destroy(); } catch (e) { /* 已断开 */ } };
 
     socket.on('error', (e) => {
@@ -152,9 +153,30 @@ function maskedFrame(opcode, payload) {
   for (let i = 0; i < masked.length; i++) { masked[i] ^= mask[i & 3]; }
   let header;
   if (payload.length < 126) { header = Buffer.from([0x80 | opcode, 0x80 | payload.length]); }
-  else {
+  else if (payload.length < 65536) {
     header = Buffer.alloc(4);
     header[0] = 0x80 | opcode; header[1] = 0x80 | 126;
+    header.writeUInt16BE(payload.length, 2);
+  } else {
+    // result 上行会出现几 MB 的帧，需要 64 位长度
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode; header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(payload.length), 2);
+  }
+  return Buffer.concat([header, mask, masked]);
+}
+
+/** 与 maskedFrame 相同，但允许关掉 FIN 位：模拟浏览器把大消息拆成分片帧。 */
+function maskedFragment(opcode, payload, fin) {
+  const mask = crypto.randomBytes(4);
+  const masked = Buffer.from(payload);
+  for (let i = 0; i < masked.length; i++) { masked[i] ^= mask[i & 3]; }
+  const head = fin ? 0x80 : 0;
+  let header;
+  if (payload.length < 126) { header = Buffer.from([head | opcode, 0x80 | payload.length]); }
+  else {
+    header = Buffer.alloc(4);
+    header[0] = head | opcode; header[1] = 0x80 | 126;
     header.writeUInt16BE(payload.length, 2);
   }
   return Buffer.concat([header, mask, masked]);
@@ -287,7 +309,93 @@ function decodeServerFrames(buf) {
       const state = await Promise.race([firstClosed.then(() => 'closed'), sleep(1500).then(() => 'open')]);
       check('新通道收到任务', gotOnSecond === true, String(gotOnSecond));
       check('旧通道被顶替关闭', state === 'closed', state);
+      // 顶替用专用 close 码 4420：扩展端据此知道"别重连，新实例已接管"。
+      // 若发 1000，旧实例的重连定时器会反过来追杀新通道，形成追逐死循环。
+      check('顶替的 close 码是 4420', first && first.closeCode === 4420, String(first && first.closeCode));
       second.close();
+    } finally {
+      srv.kill();
+      await sleep(300);
+    }
+  }
+
+  console.log('\n[5] 结果经 WS 上行结算任务');
+  {
+    const PORT = 18990;
+    const srv = spawn(process.execPath, [SERVER, '--port', String(PORT), '--no-token'], { stdio: 'ignore' });
+    await sleep(900);
+    try {
+      const hello = { type: 'hello', token: 'x', extensionId: EXT_ID, browser: 'edge', version: 'x' };
+      const ws = await wsConnect(PORT, hello);
+      await Promise.race([ws.readyWait, sleep(3000).then(() => null)]);
+
+      // 正常路径：任务从 WS 下来，结果也从 WS 回去
+      const dispatch = call(PORT, { tabId: 778899, browser: 'edge', timeoutMs: 5000, __path: '/close' });
+      const push = await Promise.race([
+        new Promise((r) => { ws.onTask = (t) => r(t); }),
+        sleep(3000).then(() => null)
+      ]);
+      check('WS 通道上下发闭环的任务已投递', push && push.id, JSON.stringify(push));
+      ws.sendText(JSON.stringify({ type: 'result', id: push.id, result: { ok: true, data: { tabId: 778899 } } }));
+      const caller = await dispatch;
+      check('结果帧在服务端结算，调用方收到 ok',
+        caller.status === 200 && caller.body.includes('"ok":true'), caller.body.slice(0, 200));
+
+      // 杂音 result（id 已超时/不存在）不能弄断通道
+      ws.sendText(JSON.stringify({ type: 'result', id: 999999, result: { ok: true } }));
+      await sleep(400);
+      const dispatch2 = call(PORT, { tabId: 778900, browser: 'edge', timeoutMs: 5000, __path: '/close' });
+      const push2 = await Promise.race([
+        new Promise((r) => { ws.onTask = (t) => r(t); }),
+        sleep(3000).then(() => null)
+      ]);
+      check('杂音 result 帧之后通道仍可投递任务', push2 && push2.tabId === 778900, JSON.stringify(push2));
+      if (push2) {
+        ws.sendText(JSON.stringify({ type: 'result', id: push2.id, result: { ok: true, data: {} } }));
+        const caller2 = await dispatch2;
+        check('第二个任务同样经 WS 回传成功', caller2.status === 200, caller2.body.slice(0, 200));
+      }
+
+      // 大结果：几 MB 的单帧（download base64 场景）必须能原样回传
+      const big = 'a'.repeat(2 * 1024 * 1024);
+      const dispatch3 = call(PORT, { tabId: 778901, browser: 'edge', timeoutMs: 8000, __path: '/close' });
+      const push3 = await Promise.race([
+        new Promise((r) => { ws.onTask = (t) => r(t); }),
+        sleep(3000).then(() => null)
+      ]);
+      ws.sendText(JSON.stringify({ type: 'result', id: push3.id, result: { ok: true, data: { blob: big } } }));
+      const caller3 = await dispatch3;
+      check('2MB 的结果帧完整回传',
+        caller3.status === 200 && caller3.body.length > big.length, `body=${caller3.body.length}`);
+      // 分片消息收完后再发下一批：浏览器会把大结果拆成分片帧（首帧 opcode=1
+      // 无 FIN、续帧 opcode=0 带 FIN）。续帧完整派发后必须在缓冲区里消费掉，
+      // 否则下一批数据到达时重放续帧会撞上已复位的 fragments 立即 close(1002)，
+      // 把同批甚至后面的结果一起吞掉（test-mcp 截图后坏读必超时的根因）。
+      const fragJson = JSON.stringify({ type: 'result', id: 777777, result: { ok: true, data: { frag: 'x'.repeat(30000) } } });
+      const mid = Math.floor(fragJson.length / 2);
+      ws.sendRaw(maskedFragment(0x1, Buffer.from(fragJson.slice(0, mid), 'utf8'), false));
+      ws.sendRaw(maskedFragment(0x0, Buffer.from(fragJson.slice(mid), 'utf8'), true));
+      const dispatch4 = call(PORT, { tabId: 778902, browser: 'edge', timeoutMs: 8000, __path: '/close' });
+      const push4 = await Promise.race([
+        new Promise((r) => { ws.onTask = (t) => r(t); }),
+        sleep(3000).then(() => null)
+      ]);
+      // 下一批数据：另一条杂音结果。旧逻辑在这一步会因重放续帧而断开
+      ws.sendText(JSON.stringify({ type: 'result', id: 888888, result: { ok: true } }));
+      await sleep(600);
+      const dispatch5 = call(PORT, { tabId: 778903, browser: 'edge', timeoutMs: 8000, __path: '/close' });
+      const push5 = await Promise.race([
+        new Promise((r) => { ws.onTask = (t) => r(t); }),
+        sleep(3000).then(() => null)
+      ]);
+      check('分片消息收完后通道不被重放续帧弄断', push4 && push5 && push5.tabId === 778903,
+        `push4=${push4 && push4.tabId} push5=${push5 && push5.tabId}`);
+      if (push5) {
+        ws.sendText(JSON.stringify({ type: 'result', id: push5.id, result: { ok: true, data: {} } }));
+        const caller5 = await dispatch5;
+        check('分片消息之后的任务仍可正常回传', caller5.status === 200, caller5.body.slice(0, 200));
+      }
+      ws.close();
     } finally {
       srv.kill();
       await sleep(300);

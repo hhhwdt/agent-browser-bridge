@@ -36,6 +36,8 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { ACTIONS } = require('./actions-registry.js');
+
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18777;
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -167,6 +169,36 @@ class BrowserBridgeClient {
     }
     // 无 data 字段的接口（如 /health）直接返回整个响应
     return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+  }
+
+  /**
+   * 逃生口：按注册表里的动作名直接调用（参数原样作为请求体下发）。
+   *
+   * 具名方法（read/click/grab…）仍是首选——它们带类型化参数提示。这个口子
+   * 服务于两个场景：发行 npm 包落后于新动作的那段空窗；以及脚本拿动作名
+   * 直接派发而不必为每个参数挑方法。路径、请求体与请求超时全部按
+   * src/actions-registry.js 的登记计算，动作名不在注册表时抛错。
+   *
+   *   const ab = createClient();
+   *   await ab.action('navigate', { url: 'https://example.com', newTab: true });
+   */
+  action(name, params = {}) {
+    const entry = ACTIONS[name];
+    if (!entry) {
+      throw new Error(`注册表里没有这个动作: ${name}（browser_list_tabs 等文档见 README）`);
+    }
+    let requestTimeout;
+    if (entry.timeout === 'wait') {
+      requestTimeout = (params.timeoutMs || 10000) + 5000;
+    } else if (typeof entry.timeout === 'number') {
+      // 留 20 秒网络余量：请求超时必须长于服务端派发超时，否则本地先断
+      requestTimeout = entry.timeout + 20000;
+    }
+    if (entry.target === 'query') {
+      const qs = params.browser ? `?browser=${encodeURIComponent(normalizeBrowserName(params.browser))}` : '';
+      return this.call('GET', entry.path + qs, undefined, requestTimeout);
+    }
+    return this.call('POST', entry.path, params, requestTimeout);
   }
 
   // ---- 服务与能力 ----

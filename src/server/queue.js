@@ -88,15 +88,17 @@ function flushTasks(browser) {
     const channel = wsChannels.get(name);
     if (channel) {
       const task = q.shift();
+      let sent = false;
       try {
-        channel.sendTask(task);
+        sent = channel.sendTask(task);
       } catch (e) {
-        // 发送失败说明连接其实已死（还没触发 onclose 清理）：把任务放回队首，
-        // 停用这个通道，落到长轮询分支兜底。不应有静默吞任务的情况。
-        q.unshift(task);
-        unregisterWsChannel(name, channel);
+        sent = false;
       }
-      continue;
+      if (sent) { continue; }
+      // sendTask 返回 false 说明连接其实已死（还没触发 onclose 清理）：把任务
+      // 放回队首、停用这个通道，落到长轮询分支兜底。不应有静默吞任务的情况。
+      q.unshift(task);
+      unregisterWsChannel(name, channel);
     }
 
     const res = heldPolls.get(name);
@@ -113,11 +115,17 @@ function flushTasks(browser) {
 /**
  * 登记一条鉴权过的 WebSocket 通道；同一浏览器的旧通道被顶替并关闭。
  * 由 routes/ws.js 鉴权通过后调用，关闭时 unregisterWsChannel 摘除。
+ *
+ * 顶替用的是专用 close 码 4420 而不是 1000：扩展端要把"被顶替"和"服务没了"
+ * 区分开——被顶替的连接所属的旧实例若还活着（重连定时器在跑），看到 1000 会
+ * 为了恢复服务再开一条连接，把它追着刚建立的那条顶替，形成两个实例无休止
+ * 互相追逐（实测毫秒级 连接→断开 死循环，任务是随后到的，全被丢在过气通道上）。
+ * 4420 的语义是"你不是当前通道了，别重连"。
  */
 function registerWsChannel(browser, channel) {
   const old = wsChannels.get(browser);
   if (old && old !== channel) {
-    try { old.close(1000); } catch (e) { /* 旧通道已死 */ }
+    try { old.close(4420); } catch (e) { /* 旧通道已死 */ }
   }
   wsChannels.set(browser, channel);
 }
@@ -129,9 +137,15 @@ function unregisterWsChannel(browser, channel) {
   }
 }
 
-/** 归一化超时参数，限制在 1 秒到 2 分钟之间。 */
-function clampTimeout(value, fallback = READ_TIMEOUT_MS) {
-  return Math.min(Math.max(parseInt(value, 10) || fallback, 1000), 120000);
+/**
+ * 归一化超时参数，限制在 1 秒到上限之间。
+ * 默认上限 2 分钟（tab 型动作的合理值）；注册表里登记了 maxTimeout 的长动作
+ * 用自己的上限。这个上限不能想当然地抬高：抓取这类标称 190 秒预算的动作，
+ * 若被默认上限截成 120 秒，调用方会先收到 timeout，而扩展其实抓取还在继续——
+ * 恰是 1.7.1 修过的"干完了却报超时"缺陷。上限与标称值都要在注册表里可见。
+ */
+function clampTimeout(value, fallback = READ_TIMEOUT_MS, cap = 120000) {
+  return Math.min(Math.max(parseInt(value, 10) || fallback, 1000), cap);
 }
 
 /** 单浏览器派发：任务只投递给指定浏览器，并等待它返回结果。 */
@@ -213,6 +227,30 @@ async function dispatch(task, timeoutMs) {
   return lastMiss || { ok: false, error: 'no_tab_matched' };
 }
 
+/**
+ * 结算一个任务的真实结果。HTTP POST /result 与 WS 的 {type:'result'} 上行共用
+ * 这一条路径，语义完全一致。
+ *
+ * 回传方必须与任务投递的浏览器一致：任务只投给一个浏览器，否则同机的另一个
+ * 浏览器、或任意本机进程只要猜到自增 id，就能顶替结算别人的任务。
+ *
+ * 返回：
+ *   { resolved: true }                      已结算
+ *   { resolved: false, mismatch, expected } 浏览器对不上（HTTP 侧回 409）
+ *   { resolved: false }                     没有这个任务在等（已超时或从未存在）
+ */
+function recordResult(browser, id, result) {
+  const entry = pending.get(id);
+  if (!entry) { return { resolved: false }; }
+  if (entry.browser && entry.browser !== browser) {
+    return { resolved: false, mismatch: true, expected: entry.browser };
+  }
+  clearTimeout(entry.timer);
+  pending.delete(id);
+  entry.resolve(result ?? { ok: false, error: 'empty_result' });
+  return { resolved: true };
+}
+
 /** 扩展不在线就回 503 并返回 true（已回过包）。 */
 function extensionOffline(res, req) {
   if (extensionConnected()) { return false; }
@@ -285,6 +323,7 @@ module.exports = {
   flushTasks,
   registerWsChannel,
   unregisterWsChannel,
+  recordResult,
   clampTimeout,
   dispatch,
   dispatchTo,

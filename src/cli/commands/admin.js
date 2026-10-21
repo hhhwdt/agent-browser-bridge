@@ -6,10 +6,36 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { getConfigDir } = require('../../config-dir.js');
 
-/** token 命令：显示 token 文件路径和内容。 */
+/**
+ * 生成并落盘一个新 token，返回 { token, file }。
+ * 独立成函数而非写在 cmdToken 里：测试用临时目录调用，不碰用户的真实 token。
+ * 服务端与 WS 都在启动时读一次 token 文件，重启后新值才生效。
+ */
+function rotateToken(configDir) {
+  const dir = configDir || getConfigDir();
+  const file = path.join(dir, 'token');
+  const token = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, token, { mode: 0o600 });
+  return { token, file };
+}
+
+/** token 命令：--rotate 生成新 token，否则显示 token 文件路径和内容。 */
 async function cmdToken(args) {
+  if (args.rotate) {
+    const { token, file } = rotateToken();
+    console.log(`新 token 已写入: ${file}`);
+    console.log(token);
+    console.log();
+    console.log('生效步骤：');
+    console.log('  1. 重启桥接服务（scripts/restart-server.ps1 或你平时的启动命令）；重启前旧 token 仍有效');
+    console.log('  2. 每个浏览器的扩展弹窗里粘贴新 token，粘贴后扩展立即自动重连');
+    return;
+  }
+
   const tokenFile = path.join(getConfigDir(), 'token');
 
   if (args.show) {
@@ -97,4 +123,4 @@ async function cmdBatch(args, ctx) {
   }
 }
 
-module.exports = { cmdToken, cmdLog, cmdBatch };
+module.exports = { cmdToken, cmdLog, cmdBatch, rotateToken };

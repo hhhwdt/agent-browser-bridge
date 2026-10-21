@@ -36,6 +36,8 @@ const ADV_LABELS = {
 
 const bridgeDot = document.getElementById('bridgeDot');
 const bridgeStatus = document.getElementById('bridgeStatus');
+const wsDot = document.getElementById('wsDot');
+const wsStatus = document.getElementById('wsStatus');
 const originList = document.getElementById('originList');
 const originInput = document.getElementById('originInput');
 const advList = document.getElementById('advList');
@@ -123,6 +125,19 @@ async function refreshBridgeStatus() {
   } catch (e) {
     bridgeDot.className = 'dot bad';
     bridgeStatus.textContent = chrome.i18n.getMessage('statusOffline');
+  }
+}
+
+/** 推送通道（WebSocket）状态走后台的消息，不直接 fetch：WS 状态在 service worker 里。 */
+async function refreshWsStatus() {
+  const r = await sendToBackground('status');
+  if (r.ok && r.ws && r.ws.healthy) {
+    wsDot.className = 'dot ok';
+    wsStatus.textContent = chrome.i18n.getMessage('statusWsOnline');
+  } else {
+    // not ok：后台还没起来或 token 还没配，轮询兜底照旧工作，不算故障
+    wsDot.className = 'dot bad';
+    wsStatus.textContent = chrome.i18n.getMessage('statusWsOffline');
   }
 }
 
@@ -270,9 +285,11 @@ function refreshExtensionId() {
 
 applyI18n();
 refreshBridgeStatus();
+refreshWsStatus();
 refreshExtensionId();
 refreshOrigins();
 refreshMarks();
 refreshAdvancedPermissions();
 refreshToken();
 setInterval(refreshBridgeStatus, 2000);
+setInterval(refreshWsStatus, 2000);

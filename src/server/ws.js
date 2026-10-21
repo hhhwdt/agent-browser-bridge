@@ -9,7 +9,9 @@
  *   - 连接只负责"任务下达"。鉴权放在首条 hello 消息（token + 扩展 ID），不放在升级
  *     请求头里——浏览器 WebSocket API 不允许自定义请求头。
  *   - 鉴权成功回 {type:"ready"}，之后任务以 {type:"task", task} 逐条推下。
- *   - 任务结果仍走原 HTTP POST /result，本通道不参与回传（大结果体上限在那里统一管）。
+ *   - 鉴权后的文本帧收 {type:"result", id, result}：任务结果经这条通道回传，
+ *     与 HTTP POST /result 共用同一结算路径（queue.recordResult）。channel
+ *     不在（断开瞬间、或还在轮询模式）时扩展回落 HTTP /result，两条路并存。
  *   - 每 20 秒两条心跳：控制帧 ping（死连接检测）与 {"type":"ka"} 文本帧。
  *     MV3 service worker 的 idle 重置只认进入 JS 事件循环的 WebSocket 往来，
  *     自动 pong 不算活动，因此保活必须用数据帧。间隔短于浏览器的 30 秒 idle 下限，
@@ -23,10 +25,14 @@
 const crypto = require('node:crypto');
 const { TOKEN } = require('./token.js');
 const { NO_TOKEN, allowedExtensionIds } = require('./config.js');
-const { normalizeBrowser, registerWsChannel, unregisterWsChannel } = require('./queue.js');
+const { normalizeBrowser, registerWsChannel, unregisterWsChannel, recordResult } = require('./queue.js');
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-const MAX_PAYLOAD = 1024 * 1024;       // hello 等消息都极小，1MB 是防御上限
+const MAX_PAYLOAD = 1024 * 1024;       // 未鉴权阶段的帧（只装身份 hello），1MB 防御上限
+// 鉴权后允许 result 上行：HTTP /result 的 JSON 体上限是 32MB，这里放宽到
+// 34MB 给 {id, result} 包裹留余量。分片后的消息总量不再封顶——能过鉴权的
+// 本机扩展是可信端，装不下超大结果时 HTTP 兜底也过不去同样的大小。
+const MAX_RESULT_PAYLOAD = 34 * 1024 * 1024;
 const HELLO_TIMEOUT_MS = 10000;        // 握手成功后多久还没发身份就断开
 const PING_INTERVAL_MS = 20000;
 const PONG_TIMEOUT_MS = 50000;         // 连续两个 ping 没回 pong 就断开
@@ -110,7 +116,8 @@ function handleUpgrade(req, socket) {
   const channel = {
     sendTask: (task) => sendObj({ type: 'task', task }),
     // 同一浏览器的新通道顶替时由 registerWsChannel 调用
-    close: () => close(1000)
+    // close 支持透传自定义 close 码（顶替用 4420；缺省为正常 1000）
+    close: (c) => close(c === undefined ? 1000 : c)
   };
 
   function close(code) {
@@ -126,7 +133,7 @@ function handleUpgrade(req, socket) {
     setTimeout(() => destroyQuietly(socket), 500);
     if (session.browser) {
       unregisterWsChannel(session.browser, channel);
-      console.log(`[ws] ${session.browser} 已断开`);
+      console.log(`[ws] ${session.browser} 已断开（code=${code}）`);
     }
   }
 
@@ -187,13 +194,29 @@ function handleUpgrade(req, socket) {
       handleHello(hello);
       return;
     }
-    // 鉴权后的文本帧只可能是任务回执类的杂音，忽略；任务从不从扩展侧经 WS 上行
+    // 鉴权后的文本帧：result 上行结算 pending，其余是杂音，忽略不回包
+    let msg = null;
+    try { msg = JSON.parse(payload.toString('utf8')); } catch (e) { return; }
+    if (msg && msg.type === 'result' && typeof msg.id === 'number') {
+      // 回传方就是持有这条通道的浏览器，无需再比对 browser 字段。
+      // 对不上（id 已超时或从未存在）与 HTTP 侧 accepted:false 同义，静默。
+      recordResult(session.browser, msg.id, msg.result);
+    }
   }
 
   // 帧解析。分片消息在这里拼完整后才交给 dispatch。
+  //
+  // 半帧到达的处理：帧可能被拆成任意多段 socket 数据，这里必须留在"尚未收完的
+  // 帧"从它自己的帧头重新解析——半帧 break 时 offset 已越过帧头（甚至吃进了
+  // 掩码字节），照 b.subarray(offset) 截会把掩码字节当成帧头直接 close(1002)
+  // （大 result 帧几乎必然分多段到达）。完整消费的边界见 parseFrames 尾部的
+  // consumed 截断说明。
   function parseFrames() {
+    // 帧上限按鉴权状态取：hello 阶段 1MB，鉴权后放大到 result 上行需要的 34MB
+    const cap = session.browser ? MAX_RESULT_PAYLOAD : MAX_PAYLOAD;
     const buf = session.buffer;
     let offset = 0;
+    let consumed = 0;
     for (;;) {
       if (buf.length - offset < 2) { break; }
       const b0 = buf[offset];
@@ -212,9 +235,9 @@ function handleUpgrade(req, socket) {
         if (buf.length - offset < 8) { break; }
         const big = buf.readBigUInt64BE(offset);
         offset += 8;
-        len = big > BigInt(MAX_PAYLOAD) ? MAX_PAYLOAD + 1 : Number(big);
+        len = big > BigInt(cap) ? cap + 1 : Number(big);
       }
-      if (len > MAX_PAYLOAD) { close(1009); return; }
+      if (len > cap) { close(1009); return; }
       if (!masked) {
         // RFC 6455：客户端帧必须掩码。不守规矩的客户端（手写脚本）直接断
         close(1002);
@@ -237,11 +260,20 @@ function handleUpgrade(req, socket) {
         if (!fin) { continue; }
         dispatchMessage(1, Buffer.concat(session.fragments.parts));
         session.fragments = null;
+        consumed = offset;
         continue;
       }
       dispatchMessage(opcode, payload);
+      consumed = offset;
     }
-    session.buffer = buf.subarray(offset);
+    // 截断的边界是"最后一个已完整消费的帧"之后：完整帧一律立即消费，只有
+    // 尚未收完的帧（可能停在帧头或载荷中间）才保留待下一轮。此前按"最后
+    // 尝试解析的帧头"截断，会把已派发的最后一帧整帧留在缓冲区里，下一批
+    // 数据到达时原样重放；若最后一帧恰好是某个分片消息的.fin 续帧，重放的
+    // 续帧会撞上已复位的 fragments 直接 close(1002)，把同批还没解析的消息
+    // 一起吞掉——test-mcp 里"截图（大结果被浏览器分片）后的下一个任务必超时"
+    // 就是这么来的。
+    session.buffer = buf.subarray(consumed);
   }
 
   socket.on('data', (chunk) => {
