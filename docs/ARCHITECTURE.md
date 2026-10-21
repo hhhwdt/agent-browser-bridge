@@ -33,7 +33,10 @@ Two things about this shape matter:
 **The bridge pushes when it can, the extension polls when it must.** The extension opens a
 WebSocket to the bridge and authenticates by sending the shared token in its first `hello`
 message (a browser WebSocket cannot carry custom headers). While that channel is up, a queued
-task is pushed onto it immediately, and the poll loop in `background.js` stands down. The
+task is pushed onto it immediately, the result comes back on the same channel as a
+`{"type":"result"}` frame (settlement shares the `/result` code path in `queue.js`), and the poll
+loop in `background.js` stands down — with the HTTP `POST /result` retained as the fallback for
+results produced while the channel is down. The
 service worker keeps being reset by the browser when it goes idle; since Chrome 116 WebSocket
 activity counts toward the idle timer, and the bridge sends two heartbeats every 20 seconds — a
 control ping for dead detection plus a data frame, because an automatically answered pong never
@@ -106,7 +109,7 @@ Mutable state that used to be scattered across `server.js` now has one home: `sr
 | `guards.js` | timeouts, frame selection, tab resolution, permission checks | nothing |
 | `config.js` | bridge URL, poll timings, browser identity | nothing |
 | `marks.js` | the visible "an agent touched this tab" state | inject-mark, config, guards |
-| `ws.js` | WebSocket task channel to the bridge; reconnect, auth via hello, task push | config |
+| `ws.js` | WebSocket channel to the bridge: reconnect, auth via hello, task push down, result frames up | config |
 | `background.js` | task dispatch, poll fallback loop, boot, listeners, error log | config, marks, actions, ws.js |
 
 The dependency direction is one-way and there are no cycles. `background.js` is the only module that

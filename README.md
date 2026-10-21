@@ -90,7 +90,7 @@ sequenceDiagram
     S->>X: task over the extension's WebSocket<br/>(long-poll when WS is unavailable)
     X->>B: executeScript across all frames
     B-->>X: extracted text
-    X->>S: POST /result
+    X->>S: result over the same WebSocket<br/>(HTTP POST /result as fallback)
     S-->>A: { ok, data }
     Note over B: the tab is never activated,<br/>no mouse or keyboard is touched
 ```
@@ -293,6 +293,7 @@ node src/cli.js upload     --match "example.com" --file /path/to/report.pdf
 # bridge management
 node src/cli.js token          # show token file path
 node src/cli.js token --show   # print the token
+node src/cli.js token --rotate # mint a replacement token (prints the steps)
 node src/cli.js log            # show last 50 audit log lines
 node src/cli.js batch steps.json  # execute a batch of actions
 ```

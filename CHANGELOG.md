@@ -8,7 +8,7 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
-## [Unreleased]
+## [1.9.0] - 2026-10-21
 
 ### Added
 
@@ -29,6 +29,22 @@ reconstructing them from the code alone would be guesswork.
 - `test/test-ws.js` (offline): handshake accept-key against the RFC 6455 §1.3 sample values, task
   push without any poll, result round-trip over HTTP, channel rejection by extension ID and by token,
   and replacement of the channel when the same browser connects twice.
+- Results travel over the WebSocket channel once it is authenticated: the extension sends
+  `{"type":"result", id, result}` on the same connection, and the server settles it through the same
+  code path the HTTP `/result` route uses (`queue.recordResult`), browser-mismatch protection
+  included. `POST /result` remains as the fallback for results produced while the channel is down.
+  The `{"type":"result"}` framing rides on the existing RFC 6455 layer; per-frame size limits now
+  differ by phase (1 MB before auth, 34 MB after, matching the 32 MB HTTP body cap plus slack).
+- `node src/cli.js token --rotate` mints a replacement token file and prints the two steps to make
+  it live (restart the bridge — the old token stays valid until then — and re-paste the new value in
+  each browser's popup, which reconnects immediately). For leak response; previously the only way
+  was deleting the file by hand.
+- `client.action(name, params)`: an escape hatch that dispatches by registry action name. Named
+  methods stay the comfortable path; this one covers the window where a published npm package lags
+  behind a new action, and it derives path, body and request timeout from the registry entry.
+- The popup shows the push-channel state ("推送通道: 在线/离线") from the background's own `ws`
+  state, next to the bridge dot — when a call becomes slow, the popup answers "is the channel up"
+  without a `diag` round trip.
 
 ### Changed
 
@@ -58,6 +74,37 @@ reconstructing them from the code alone would be guesswork.
   (`createClient({ token })` overrides); the 401 hint names both paths. No security regression:
   the barrier this preserves is against other extensions and other-user processes, not against a
   process already running as the user, which could read the file anyway.
+- `grab`'s 190-second dispatch budget never took effect: `clampTimeout` carries a hard 120-second
+  ceiling, and the registry-declared default was silently clamped to it. Long fetches then reported
+  `timeout` to the caller while the extension was still downloading — the "worked anyway" defect
+  class 1.7.1 cleaned up. The ceiling is now a registry field (`maxTimeout`); `grab` declares
+  300000 so its own default survives, other actions keep the 2-minute ceiling, and
+  `test/test-registry.js` pins the invariant that every declared default really applies.
+- The WebSocket frame parser kept its truncation boundary at the start of the last *attempted* frame
+  instead of the last *consumed* one, with two consequences. A batch ending exactly on a complete
+  frame left that frame buffered, so it was dispatched a second time when the next chunk arrived —
+  fatal for the final continuation of a fragmented message, whose replay hits an empty fragment
+  state and answers `close(1002)`, discarding every other message in that chunk (this is the
+  deterministic `browser_read_page` timeout right after `browser_screenshot`: the ~100 KB result is
+  split into continuation frames by the browser, and the next inbound message kills the channel).
+  Incomplete frames split across TCP segments are now also resumed precisely from the start of the
+  not-yet-complete frame. The parser tracks a consumed boundary: complete frames are consumed
+  immediately, only unfinished ones are retained. `test/test-ws.js` adds a fragmented-message
+  regression (continuations finish, then a following message must still be parsed).
+- The extension could enter a reconnect chase where two live WebSocket instances kept replacing each
+  other at sub-second intervals. `connect()` had no re-entrancy guard and a socket's `onclose`
+  cleared `sock`/`healthy` unconditionally, so a stale reconnect timer firing next to an already
+  healthy channel opened a duplicate connection, which the server replaces by design, and whose
+  victim's `onclose` then re-armed the chase — after a bridge restart the flap fed itself forever
+  and tasks landed on the doomed connection (callers saw `timeout`). Three fixes that hold together:
+  `connect()` refuses when a socket exists, `onclose` ignores a socket that is no longer the current
+  one, and the server's replacement close now carries the dedicated code 4420 ("a newer connection
+  of your browser took over — do not reconnect") instead of a generic 1000. `test/test-ws.js` pins
+  the 4420 code.
+- A queued task sent onto a WebSocket channel that had died in the seconds before its `onclose`
+  cleanup was silently dropped (`flushTasks` only handled `throw`, but `sendTask` returns `false`
+  in that state); it is now put back at the queue head and the channel is unregistered so the
+  long-poll fallback takes it over.
 
 ## [1.8.0] - 2026-10-20
 

@@ -86,7 +86,7 @@ sequenceDiagram
     S->>X: 通过 WebSocket 下发任务<br/>（WS 不可用时走长轮询）
     X->>B: executeScript（覆盖所有框架）
     B-->>X: 提取到的文本
-    X->>S: POST /result
+    X->>S: 结果经同一 WebSocket 回传<br/>（WS 不可用时走 HTTP /result）
     S-->>A: { ok, data }
     Note over B: 标签页始终没有被激活，<br/>鼠标与键盘全程未被触碰
 ```
@@ -297,6 +297,7 @@ node src/cli.js upload     --match "example.com" --file /path/to/report.pdf
 # 桥接管理
 node src/cli.js token          # 显示 token 文件路径
 node src/cli.js token --show   # 打印 token
+node src/cli.js token --rotate # 换一把新 token（打印生效步骤）
 node src/cli.js log            # 显示最近 50 条审计日志
 node src/cli.js batch steps.json  # 批量执行动作
 ```

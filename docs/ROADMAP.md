@@ -6,8 +6,9 @@ without re-deriving the context: what it is, why it matters, where the change go
 done, and which parts are still open questions rather than settled design.
 
 **State when this was written:** 1.7.1 is on `main` (the eight silent-success fixes plus the
-packaging guards, tests and scaffolding). Publishing to npm needs the repository secret `NPM_TOKEN`;
-the tag `v1.7.1` is what triggers it.
+packaging guards, tests and scaffolding). Publishing to npm used to need the repository secret
+`NPM_TOKEN`, with the tag `v1.7.1` as the trigger; since October 2026 the release workflow uses
+npm Trusted Publishing (OIDC) instead — see the header of `.github/workflows/release.yml`.
 
 ## Suggested order
 

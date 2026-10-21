@@ -5,8 +5,18 @@
 #   node tools/check-version.js        # package.json 与 manifest.json 必须一致
 #   git tag v1.7.1 && git push origin v1.7.1
 #
-# 需要先在仓库设置里加一个 secret：NPM_TOKEN（npm 的 Automation token）。
-# 没有这个 secret 时工作流会在发布那一步失败，不会静默跳过。
+# 身份验证用 npm Trusted Publishing（OIDC），不再用长期 token：长期 Automation
+# token 已停发，classic secret 在 npm 2025 年底的 token 改版后不再是官方推荐路径。
+# 首次启用前需要在 npmjs.com 配一次（包 → Settings →
+# Trusted Publishing），填这个仓库与 workflow 文件名：
+#
+#   Owner: hhhwdt        Repository: agent-browser-bridge
+#   Workflow filename: release.yml
+#
+# 没配这一步时发布会在 npm publish 失败（registry 不认 OIDC 身份），不会静默跳过。
+#
+# 运行时要求：npm 的 OIDC 发布需要 npm ≥ 11.5，Node 22 自带的 npm 不到这个版本，
+# 所以发布前先升级 npm。
 #
 # 发布前不需要单独的测试步骤：npm publish 会先跑 package.json 里的 prepublishOnly，
 # 那一步执行完整离线套件，失败就不会发布。跑两遍没意义，所以这里不重复。
@@ -18,7 +28,7 @@ on:
 
 permissions:
   contents: write   # 建 GitHub Release
-  id-token: write   # npm 的来源证明（provenance）
+  id-token: write   # npm Trusted Publishing 用 OIDC 身份，也用于 provenance
 
 jobs:
   publish:
@@ -41,10 +51,12 @@ jobs:
           fi
           echo "准备发布 $pkg"
 
-      - name: 发布到 npm（带来源证明）
+      - name: 升级 npm 到支持 trusted publishing 的版本（>=11.5）
+        run: npm install -g npm@latest
+
+      - name: 发布到 npm（Trusted Publishing + 来源证明，无需 token）
         run: npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           ABB_MCP_OFFLINE: '1'   # 发布机上没有浏览器，跳过 MCP 的真实调用那一节
 
       - name: 建 GitHub Release

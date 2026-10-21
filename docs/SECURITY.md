@@ -20,7 +20,7 @@ sandbox, and it does not try to protect you from software you chose to run.
 | A web page you visit | The server rejects any request carrying a non-local `Origin`, so a page cannot drive the bridge with `fetch` or a form post. It also cannot read a response or post a task result. |
 | A site that has not been granted | The extension checks the origin against the browser's permission store before every injection. Access is denied until you grant it in the popup. |
 | Silent operation | Actions mark the tab (badge, favicon dot, title prefix) and show an in-page indicator. There is no unmarked mode. |
-| Result spoofing between browsers | `/result` rejects a reply from a browser other than the one the task was sent to. |
+| Result spoofing between browsers | A result is only settled when it comes from the browser the task was sent to — the same rule on `/result` and on WebSocket result frames. |
 | An extension that has not asked for host access to the bridge | Such a request is cross-origin, so Chrome attaches an `Origin` of `chrome-extension://<id>`; the server checks that ID against an allowlist and answers 403. |
 | A second extension that declares host access to `127.0.0.1:18777` | The bridge generates a shared token on first start and requires `X-ABB-Token` on every route. The real extension reads the token from `chrome.storage.local` (pasted in the popup once). A second extension cannot read the token file, so it cannot drive the bridge. |
 
@@ -29,7 +29,9 @@ sandbox, and it does not try to protect you from software you chose to run.
 - **Any process running as you.** The shared token closes the "another extension" hole, but a
   local process running as the same user can read the token file from disk. Treat "can run code
   on this machine as this user" as the trust boundary — the token raises the bar from "any
-  extension" to "any process that can read your config directory".
+  extension" to "any process that can read your config directory". If you suspect the token was
+  copied, rotate it: `node src/cli.js token --rotate` mints a replacement and prints the two
+  steps (restart the bridge, re-paste in each browser's popup).
 - **A web page you visit.** Pages cannot read the token file. They can still reach `/health`
   and trigger a `/tabs` dispatch, but they cannot poll for tasks or call any action because
   they cannot send `X-ABB-Token`. The WebSocket channel requires the token in its first
