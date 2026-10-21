@@ -99,7 +99,10 @@ function runChecks(checks, body, res, req) {
 function resolveTimeout(entry, task, body) {
   if (entry.timeout === 'wait') { return task.timeoutMs + 5000; }
   if (entry.timeout === 'once') { return READ_TIMEOUT_MS; }
-  if (typeof entry.timeout === 'number') { return clampTimeout(body.timeoutMs, entry.timeout); }
+  if (typeof entry.timeout === 'number') {
+    // 标称默认值超过默认上限的动作靠 maxTimeout 抬顶（见 registry grab 的注释）
+    return clampTimeout(body.timeoutMs, entry.timeout, entry.maxTimeout);
+  }
   return clampTimeout(body.timeoutMs);
 }
 
@@ -132,4 +135,4 @@ function makeRoute(name) {
   };
 }
 
-module.exports = { makeRoute, buildTask, runChecks };
+module.exports = { makeRoute, buildTask, runChecks, resolveTimeout };

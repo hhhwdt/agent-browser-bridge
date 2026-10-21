@@ -82,9 +82,11 @@ const TARGET = { target: true };
  *   params     目标之外的参数：{ 键: 取值形态 }
  *   checks     校验规则数组，按序执行，任一命中即回 400
  *   timeout    null  clampTimeout(body.timeoutMs)（默认上限）
- *              数字  clampTimeout(body.timeoutMs, 数字)
+ *              数字  clampTimeout(body.timeoutMs, 数字, maxTimeout)
  *              'wait' 特例：任务里的 timeoutMs 是等待预算，派发超时 = 预算 + 5000
  *              'once' /tabs 用的固定 READ_TIMEOUT_MS
+ *   maxTimeout 派发超时的独立上限（省略 120 秒）。标称默认值超过默认上限的
+ *              长动作必须登记，否则默认值会被默认上限悄悄截断（见 grab）
  *   mcp        对应的 MCP 工具名（省略 = 无工具）
  *   mcpTarget / mcpParams / mcpRequired / mcpSchema / mcpDescription
  *              schema 生成用的元数据，文案与原来逐字一致
@@ -243,7 +245,11 @@ const ACTIONS = {
       // 与其他动作不同：grab 的"标签页定位"只认 match 或 tabId（在哪个标签页内取流）
       { grabTarget: '需要提供 match 或 tabId，用于指定在哪个标签页内取流' }
     ],
-    timeout: 190000
+    timeout: 190000,
+    // 标称默认预算超过 120 秒默认上限的动作，必须显式声明自己的上限，否则
+    // clampTimeout 会把 190000 截成 120000——调用方先收到 timeout，扩展还在抓，
+    // 又是"干完了却报超时"。上限取标称值向上留一档：单调用最长等 5 分钟。
+    maxTimeout: 300000
   },
 
   save: {

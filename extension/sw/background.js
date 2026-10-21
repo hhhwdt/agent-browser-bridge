@@ -12,7 +12,7 @@
 
 import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
 import { MARKS_KEY, collectMarkedTabs, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
-import { startWs, retryWs, wsConnected, wsState } from './ws.js';
+import { startWs, retryWs, wsConnected, wsState, sendResult } from './ws.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
 
 let loopRunning = false;
@@ -306,6 +306,11 @@ async function postResult(taskId, result) {
     }
   }
 
+  // 优先走已建立的 WS 通道回传：服务端用同一条结算路径，语义与 HTTP /result
+  // 完全一致。通道不在（WS 断开瞬间、回退轮询模式、send 竞态失败）走 HTTP 兜底，
+  // 保证任何情况下结果都有回传路径。
+  if (sendResult(taskId, result)) { return; }
+
   try {
     const headers = { 'Content-Type': 'application/json', ...(await tokenHeaders()) };
     const res = await fetch(`${BRIDGE_URL}/result?browser=${encodeURIComponent(BROWSER_NAME)}`, {
@@ -433,7 +438,9 @@ try {
             browser: BROWSER_NAME,
             version: chrome.runtime.getManifest().version,
             markedCount: markedTabs.size,
-            markedTabs: Array.from(markedTabs)
+            markedTabs: Array.from(markedTabs),
+            // WebSocket 推送通道状态，弹窗显示"推送通道：在线/离线"
+            ws: wsState()
           });
           return;
         }
@@ -463,7 +470,7 @@ function bootstrap() {
   pollLoop();
 
   // WebSocket 任务通道。任务推进 WS 后由 onTask 走与轮询完全相同的处理路径
-  //（异步执行 + HTTP POST /result 回传），通道只改任务的"到达方式"。
+  //（异步执行 + 结果回传：WS 通道在就用 WS，否则 HTTP POST /result 兜底）。
   // 回调存进 keepWs：保活闹钟的 retryWs 救援复用同一处理路径。
   try {
     keepWs = {

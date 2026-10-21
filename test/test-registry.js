@@ -213,5 +213,43 @@ console.log('\n[7] CAPABILITIES 能力清单');
   check('每个动作都在能力清单里', missing.length === 0, missing.join(', '));
 }
 
+/* ------------------------------------------------------------------ *
+ * [8] 派发超时与 maxTimeout
+ * ------------------------------------------------------------------ *
+ * grab 曾被默认上限悄悄截断：注册表标称 190000，clampTimeout 的上限是
+ * 120000，实际派发超时 120 秒——大文件抓取时调用方先收到 timeout，扩展还在
+ * 继续。这里钉住不变量：任何标称预算都必须真实生效，而不是被默认上限吃掉。
+ */
+
+console.log('\n[8] 派发超时与 maxTimeout');
+{
+  const { resolveTimeout } = require('../src/server/routes/generic.js');
+
+  let capped = [];
+  for (const [name, entry] of Object.entries(ACTIONS)) {
+    if (typeof entry.timeout !== 'number') { continue; }
+    if (entry.maxTimeout !== undefined && entry.timeout > entry.maxTimeout) {
+      capped.push(`${name}: 标称 ${entry.timeout} > maxTimeout ${entry.maxTimeout}`);
+    }
+    const eff = resolveTimeout(entry, {}, {});
+    if (eff !== entry.timeout) {
+      capped.push(`${name}: 标称 ${entry.timeout} 实际生效 ${eff}（被默认上限截断了？）`);
+    }
+  }
+  check('每个数字型标称超时都真实生效', capped.length === 0, capped.join('; '));
+
+  const grab = ACTIONS.grab;
+  check('grab 的 190 秒默认预算未被截断，上限 300 秒',
+    resolveTimeout(grab, {}, {}) === 190000
+    && resolveTimeout(grab, {}, { timeoutMs: 1000000000 }) === 300000,
+    String(resolveTimeout(grab, {}, {})));
+
+  // 无 maxTimeout 的动作仍受默认上限约束
+  const read = ACTIONS.read;
+  check('普通动作（read）的显式超时仍被默认上限 120 秒约束',
+    resolveTimeout(read, {}, { timeoutMs: 1000000000 }) === 120000
+      && resolveTimeout(read, {}, {}) === 30000);
+}
+
 console.log(`\n通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
