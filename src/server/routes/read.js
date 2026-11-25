@@ -10,7 +10,7 @@
 const { API_VERSION, CAPABILITIES, allowedExtensionIds } = require('../config.js');
 const { sendJson, readBody } = require('../http.js');
 const {
-  dispatch, connectedBrowsers, orderBrowsers, extensionConnected, pending, queuedCount
+  dispatch, connectedBrowsers, orderBrowsers, extensionConnected, pending, queuedCount, inflightFor
 } = require('../queue.js');
 const { makeRoute } = require('./generic.js');
 const desktop = require('../../computer/exec.js');
@@ -26,6 +26,9 @@ const routeHealth = async function routeHealth(req, res) {
     browsers: connectedBrowsers(),
     pendingTasks: pending.size,
     queuedTasks: queuedCount(),
+    // 已交给扩展、尚未结算的任务数（按浏览器分开）。队列上限是背压，
+    // 这两个数字放在一起才能看出"是在排队还是在飞"。
+    inFlightTasks: connectedBrowsers().reduce((n, b) => n + inflightFor(b), 0),
     capabilities: CAPABILITIES,
     allowedExtensionIds: Array.from(allowedExtensionIds),
     defaultBrowserOrder: orderBrowsers(connectedBrowsers()),

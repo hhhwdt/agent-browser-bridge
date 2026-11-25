@@ -87,6 +87,24 @@ reconstructing them from the code alone would be guesswork.
 
 ### Changed
 
+- The dispatch queue drains its whole backlog when a channel is available, and holds back above a
+  per-browser in-flight cap (32; `ABB_MAX_INFLIGHT` overrides). Before, one `flushTasks` call sent one
+  task, so anything queued behind it waited for another trigger — the extension could sit idle with
+  work pending. A burst of thousands of calls now queues instead of landing in one service worker at
+  once, and the slot is returned by the result or the timeout, whichever comes first. `/health`
+  reports `inFlightTasks` alongside `queuedTasks` so the two are distinguishable.
+- The client takes `concurrency` and `retries`. `concurrency` is a FIFO gate rather than a burst
+  limiter — extra calls wait instead of failing. `retries` applies only to read-class actions and
+  only to transient errors, with exponential backoff and jitter; a `click` that timed out is never
+  repeated, because the first one may already have landed. Both default to off.
+- The offline runner runs suites four at a time (24 s instead of ~60 s here) and prints each suite's
+  output as it finishes. The suites that drive a real mouse and keyboard stay serial and run last;
+  two of them interleaving input would fail at random. Two duplicated test ports were fixed so the
+  suites can overlap at all.
+- `tools/check-orphans.js` fails on a file nothing references, so a superseded implementation cannot
+  keep looking like the current one. It already found six: `src/computer/scripts/*.ps1` are the
+  pre-`host/lib` versions, unreferenced and already drifted.
+
 - Steady-state throughput is 3.7x higher, measured with `test/bench-throughput.js` on a local page:
   `eval` went from 13.0 ms to 3.5 ms per call serially (77 to 285 ops/s), and eight tabs in parallel
   from 270 to 1034 ops/s. Two causes, both fixed:

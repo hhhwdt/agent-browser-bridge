@@ -42,6 +42,34 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 18777;
 const DEFAULT_TIMEOUT_MS = 30000;
 
+/** HTTP 路径 -> 动作名。重试策略按动作判断，不必给每个具名方法单独传标记。 */
+const PATH_TO_ACTION = new Map();
+for (const [name, entry] of Object.entries(ACTIONS)) {
+  if (entry && entry.path) { PATH_TO_ACTION.set(entry.path, name); }
+}
+
+/**
+ * 可以安全重试的动作：读类，重复执行不改变页面、不落盘。
+ *
+ * click / type / key / navigate / upload / save / grab / download / close 以及
+ * computer_* 都不在这里。它们的第一次调用可能已经生效、只是结果没回来，
+ * 重试就是"点两次""存两份"。桌面动作另有 requestId 幂等，那是另一条路。
+ */
+const RETRY_SAFE = new Set([
+  'tabs', 'read', 'links', 'media', 'frames', 'diag', 'session', 'screenshot',
+  'mark', 'unmark', 'activate', 'wait'
+]);
+
+/** 值得重试的错误：暂时性的，等一会儿可能就好。业务性失败重试没有意义。 */
+const RETRYABLE_ERRORS = new Set([
+  'timeout', 'queue_full', 'extension_not_connected', 'tab_unresponsive', 'bridge_unavailable'
+]);
+
+/** 睡一会儿。重试间隔用。 */
+function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
 /** 桥接服务返回的业务错误。 */
 class BridgeError extends Error {
   constructor(payload, httpStatus) {
@@ -96,6 +124,10 @@ class BrowserBridgeClient {
    * @param {number}  [options.timeoutMs=30000] 单次请求默认超时
    * @param {string}  [options.token] 显式指定共享 token；省略时自动读配置目录下的 token 文件
    * @param {string}  [options.agent] 调用方身份（写进 X-ABB-Agent，桌面写锁与审计按它区分）
+   * @param {number}  [options.concurrency=0] 同时在飞的请求上限；0 表示不限制。批量作业用它压住尖峰
+   * @param {number}  [options.retries=0] 读类动作失败后的重试次数（写类动作永远不自动重试，见 RETRY_SAFE）
+   * @param {number}  [options.retryDelayMs=250] 首次重试的间隔，之后按指数退避
+   * @param {number}  [options.maxRetryDelayMs=2000] 退避上限
    */
   constructor(options = {}) {
     this.host = options.host || DEFAULT_HOST;
@@ -103,6 +135,48 @@ class BrowserBridgeClient {
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
     this.token = options.token !== undefined ? options.token : readLocalToken();
     this.agent = options.agent || '';
+    this.concurrency = options.concurrency > 0 ? options.concurrency : 0;
+    this.retries = options.retries > 0 ? Math.floor(options.retries) : 0;
+    this.retryDelayMs = options.retryDelayMs || 250;
+    this.maxRetryDelayMs = options.maxRetryDelayMs || 2000;
+    /** 正在飞的请求数，以及排队等名额的调用方。 */
+    this._active = 0;
+    this._waiters = [];
+  }
+
+  /**
+   * 取一个并发名额。达到上限就排队，名额由释放方直接转交。
+   * 用转交而不是"唤醒后再自己加"，是为了让 _active 永远不超过上限。
+   */
+  async _acquire() {
+    if (!this.concurrency) { return; }
+    if (this._active < this.concurrency) { this._active++; return; }
+    await new Promise((resolve) => { this._waiters.push(resolve); });
+  }
+
+  /** 释放名额：有排队的就把名额直接转交，没有才真正减一。 */
+  _release() {
+    if (!this.concurrency) { return; }
+    const next = this._waiters.shift();
+    if (next) { next(); } else { this._active--; }
+  }
+
+  /**
+   * 带并发闸门的请求。
+   * 不限并发时直接走原路径，不多绕一层 promise——默认行为和以前完全一致。
+   */
+  _requestInSlot(method, urlPath, body, timeoutMs) {
+    if (!this.concurrency) {
+      return this.request(method, urlPath, body, timeoutMs);
+    }
+    return (async () => {
+      await this._acquire();
+      try {
+        return await this.request(method, urlPath, body, timeoutMs);
+      } finally {
+        this._release();
+      }
+    })();
   }
 
   /** 低层请求。返回 { status, data }。 */
@@ -162,16 +236,34 @@ class BrowserBridgeClient {
     });
   }
 
-  /** 发请求并解包：成功返回 data，失败抛 BridgeError。 */
+  /**
+   * 发请求并解包：成功返回 data，失败抛 BridgeError。
+   *
+   * 重试只发生在两类条件同时成立时：调用方开了 retries，且这个动作在 RETRY_SAFE
+   * 里（读类）。写类动作一次都不重试——它们的第一次调用可能已经生效，重试等于
+   * 重复操作。退避是指数式的，带一点抖动，避免批量作业同时重试。
+   */
   async call(method, urlPath, body, timeoutMs) {
-    const res = await this.request(method, urlPath, body, timeoutMs);
-    const payload = res.data;
+    const action = PATH_TO_ACTION.get(urlPath);
+    const maxAttempts = this.retries > 0 && RETRY_SAFE.has(action) ? this.retries + 1 : 1;
 
-    if (!payload || payload.ok !== true) {
-      throw new BridgeError(payload, res.status);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await this._requestInSlot(method, urlPath, body, timeoutMs);
+        const payload = res.data;
+        if (!payload || payload.ok !== true) {
+          throw new BridgeError(payload, res.status);
+        }
+        // 无 data 字段的接口（如 /health）直接返回整个响应
+        return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+      } catch (e) {
+        const retryable = e instanceof BridgeError && RETRYABLE_ERRORS.has(e.code);
+        if (!retryable || attempt >= maxAttempts) { throw e; }
+
+        const base = Math.min(this.retryDelayMs * Math.pow(2, attempt - 1), this.maxRetryDelayMs);
+        await sleep(Math.round(base * (0.8 + Math.random() * 0.4)));
+      }
     }
-    // 无 data 字段的接口（如 /health）直接返回整个响应
-    return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
   }
 
   /**

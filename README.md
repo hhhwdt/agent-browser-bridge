@@ -439,6 +439,21 @@ await ab.grab({ match: 'example.com/watch', url: media.videos[0].src, filename: 
 
 Failures throw `BridgeError` with a `code`; an unreachable bridge throws `BridgeUnavailableError`.
 
+For bulk work, cap the number of requests in flight and let the client retry the read-class
+actions:
+
+```js
+const ab = createClient({ concurrency: 8, retries: 2 });
+const pages = await Promise.all(urls.map((u) => ab.read({ url: u })));
+```
+
+`concurrency` is a queue, not a burst limiter: extra calls wait their turn, so the browser and the
+site see at most that many at once. `retries` applies only to actions that are safe to repeat
+(`tabs`, `read`, `links`, `media`, `frames`, `diag`, `session`, `screenshot`, `mark`, `unmark`,
+`activate`, `wait`) and only to transient errors (`timeout`, `queue_full`, `extension_not_connected`,
+`tab_unresponsive`, `bridge_unavailable`). A `click` that timed out is **never** retried — the first
+one may already have landed. Both default to off, so existing code behaves exactly as before.
+
 ### New in 1.8.0
 
 **Shared token.** The bridge generates a token on first start. Paste it into the extension popup
@@ -685,6 +700,9 @@ node test/test-offline.js        # all of the suites below, then a summary
 | `test-sw-load.js` | the service-worker module graph loads at all, boots exactly once, and still exports what it used to — in a browser a load-time failure only shows up as "the extension stopped responding" |
 | `test-result-semantics.js` | an action that could not do its job reports `ok: false` rather than success — the failure mode that leaves the caller with no reason to look again |
 | `test-mark-throttle.js` | the page-side marks are injected once per tab and refreshed on an interval, not re-injected on every action |
+| `test-queue-inflight.js` | the per-browser in-flight cap, draining a backlog in one go, a dead channel leaving the task queued rather than swallowing it, and a timeout returning its slot |
+| `test-client-limits.js` | the client's concurrency gate (a queue, not a burst) and that only read-class actions are retried — a timed-out `click` is never repeated |
+| `check-orphans.js` | no file in the shipped tree is unreferenced; superseded implementations get deleted instead of left to look current |
 | `test-i18n-keys.js` | every i18n key used by the popup and the manifest exists in both locale files — a missing key renders as an empty string, which is silent |
 | `test-wait.js` | each wait condition (selector, text, url, count, idle) returns ok when satisfied and `wait_timeout` when not — the failure mode that means "the next step ran before the page was ready" |
 | `test-audit.js` | the audit log records actions but never page content — a log that leaks what someone read is worse than no log |
@@ -707,6 +725,11 @@ node test/test-offline.js        # all of the suites below, then a summary
 `test-mcp.js` skips its live section when `ABB_MCP_OFFLINE=1` is set, which is what CI uses. The same
 suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22). Windows is this tool's main
 platform, so it is not left to a single Ubuntu job to prove.
+
+The runner executes suites four at a time (`ABB_TEST_CONCURRENCY=1` goes serial, which is the first
+thing to try when a run looks flaky) and prints each suite's output when it finishes. The suites that
+drive a real mouse and keyboard are kept out of the parallel batch and run last, one at a time —
+two of them interleaving input would fail at random and type into whatever window is in front.
 
 `test/` and `tools/` exist in a clone only; they are not part of the published package.
 

@@ -14,7 +14,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 
-const PORT = 18998;
+const PORT = 19002;
 const HOST = '127.0.0.1';
 const SERVER = path.join(__dirname, '..', 'src', 'server.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

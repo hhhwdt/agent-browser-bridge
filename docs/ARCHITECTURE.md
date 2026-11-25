@@ -61,8 +61,10 @@ src/            the Node side: the bridge, the library, and three entry points
 extension/      the browser extension (MV3)
   sw/             the service worker, split by responsibility
   popup.html/js   the extension popup
-test/           tests — the README says which ones need a browser
-tools/          offline checks (injection scope, extension ID consistency)
+test/           tests — the README says which ones need a browser; the offline runner
+                parallelises them and keeps the desktop-driving ones serial
+tools/          offline checks (injection scope, extension ID consistency, version, package
+                contents, orphaned files)
 scripts/        Windows helpers for running the bridge as a service
 docs/           disclaimer, security model, privacy, quickstart, this file
 ```
@@ -93,7 +95,7 @@ bin paths, `npm test` spawn paths and user scripts never change. The implementat
 | `src/cli/` | argument parsing, usage text, output helpers, the update check, and `commands/` with one file per command group; `src/cli/index.js` routes to them |
 | `src/mcp/` | tool schemas and instructions (`tools.js`), the tool → bridge call mapping (`handlers.js`), the ensure-the-bridge-is-running step (`ensure.js`) |
 | `src/version.js`, `src/config-dir.js` | the two helpers that were duplicated between the server and the CLI (`isNewerVersion`, `getConfigDir`) |
-| `src/client.js`, `src/setup.js` | unchanged |
+| `src/client.js` | the library: transport, `BridgeError` classification, an optional concurrency gate (`concurrency`) and read-class retry with backoff (`retries`); `setup.js` is the self-check |
 
 Mutable state that used to be scattered across `server.js` now has one home: `src/server/queue.js`.
 
@@ -177,6 +179,14 @@ graph: a load-time failure shows up in a browser only as "the extension stopped 
 
 **`eval` runs the code exactly once.** The first implementation evaluated twice when it could not
 get a return value, so a bare `document.querySelector('#x').click()` clicked twice.
+
+**A queued task is not an in-flight task.** `flushTasks` used to send exactly one task per call, so a
+backlog built while the channel was down drained one task per later trigger — the tasks behind the
+first sat there with nothing to wake them. It now loops until the queue is empty or the per-browser
+in-flight cap is reached, and the cap (32, `ABB_MAX_INFLIGHT`) is what stops a burst of thousands of
+calls from landing in one service worker at once. The slot is returned by whichever comes first,
+the result or the timeout; a result that arrives after its task timed out is ignored rather than
+returned twice.
 
 **A write action must not execute in every frame.** `allFrames: true` runs the function in each
 frame; a picker can only choose which result to believe, it cannot undo the other clicks. click,

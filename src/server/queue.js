@@ -16,11 +16,54 @@ const { logAudit } = require('./audit.js');
 const heldPolls = new Map();     // 浏览器名 -> 挂起的长轮询响应
 const lastSeen = new Map();      // 浏览器名 -> 最近心跳时间
 const queues = new Map();        // 浏览器名 -> 该浏览器专属的待下发任务数组
-const pending = new Map();       // 任务 id -> { resolve, timer, browser }
+const pending = new Map();       // 任务 id -> { resolve, timer, browser, sent }
 const wsChannels = new Map();    // 浏览器名 -> WebSocket 通道（registerWsChannel 登记）
+const inflight = new Map();      // 浏览器名 -> 已下发、尚未结算的任务数
 let nextTaskId = 1;
 
 const HEARTBEAT_MS = 30000;      // 超出此时间未心跳视为离线
+
+/**
+ * 每个浏览器同时"已交给扩展、还没结算"的任务上限。
+ *
+ * 没有上限时，一次几千个并发调用会全塞进同一个 service worker，它只能串行处理，
+ * 结果是所有调用一起变慢、超时率上升；有了上限，多出来的任务留在队列里排队，
+ * 已经是进行中的那些先拿到结果。上限不是并发度，是背压。
+ *
+ * ABB_MAX_INFLIGHT 可覆盖（测试用）。
+ */
+const MAX_INFLIGHT = (() => {
+  const v = parseInt(process.env.ABB_MAX_INFLIGHT || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 32;
+})();
+
+/** 某个浏览器当前在飞的任务数。 */
+function inflightFor(browser) {
+  return inflight.get(browser) || 0;
+}
+
+/** 增减在飞计数；归零时删键，避免 Map 无界增长。 */
+function bumpInflight(browser, delta) {
+  const next = Math.max(0, inflightFor(browser) + delta);
+  if (next === 0) { inflight.delete(browser); } else { inflight.set(browser, next); }
+}
+
+/** 任务刚交给扩展：记一次在飞。重复调用只算一次。 */
+function markSent(task) {
+  const entry = pending.get(task.id);
+  if (entry && !entry.sent) {
+    entry.sent = true;
+    bumpInflight(task.browser, 1);
+  }
+}
+
+/** 任务结算或过期：如果在飞，还回一个名额，并让队列继续往下走。 */
+function releaseInflight(entry) {
+  if (!entry || !entry.sent) { return; }
+  entry.sent = false;
+  bumpInflight(entry.browser, -1);
+  flushTasks(entry.browser);
+}
 
 /** 取某个浏览器的专属队列，队列按浏览器隔离，互不串扰。 */
 function queueFor(browser) {
@@ -87,27 +130,40 @@ function flushTasks(browser) {
 
     const channel = wsChannels.get(name);
     if (channel) {
-      const task = q.shift();
-      let sent = false;
-      try {
-        sent = channel.sendTask(task);
-      } catch (e) {
-        sent = false;
+      // WS 通道活着就一次把能发的都发出去，直到队列空或撞上在飞上限。
+      // 以前每次调用只发一个：任务堆起来之后（通道刚重连、或一次批量调用）
+      // 只能靠下一次触发再放一个，排在后面的任务会长时间没人管。
+      let dead = false;
+      while (q.length > 0 && inflightFor(name) < MAX_INFLIGHT) {
+        const task = q[0];
+        let sent = false;
+        try {
+          sent = channel.sendTask(task);
+        } catch (e) {
+          sent = false;
+        }
+        if (!sent) { dead = true; break; }   // 连接其实已死：任务留在队首，走兜底
+        q.shift();
+        markSent(task);
       }
-      if (sent) { continue; }
-      // sendTask 返回 false 说明连接其实已死（还没触发 onclose 清理）：把任务
-      // 放回队首、停用这个通道，落到长轮询分支兜底。不应有静默吞任务的情况。
-      q.unshift(task);
-      unregisterWsChannel(name, channel);
+      if (dead) {
+        // 还没触发 onclose 的坏连接：停用通道，落到长轮询分支兜底。
+        unregisterWsChannel(name, channel);
+      } else {
+        continue;                            // 通道可用：不要再碰长轮询槽位
+      }
     }
 
     const res = heldPolls.get(name);
     if (!res) { continue; }                              // 该浏览器未持有长轮询，等它下次轮询
 
-    // 一次轮询只下发一个任务，保证结果与任务一一对应
+    // 长轮询一次只下发一个任务，保证结果与任务一一对应；在飞满了就先不发，
+    // 让这次轮询按挂起超时结束，扩展会再来问。
+    if (inflightFor(name) >= MAX_INFLIGHT) { continue; }
     const task = q.shift();
     heldPolls.delete(name);
     clearTimeout(res.__holdTimer);
+    markSent(task);
     sendJson(res, 200, task, res.__req);
   }
 }
@@ -163,16 +219,20 @@ function dispatchTo(browser, task, timeoutMs) {
     task.browser = browser;
 
     const timer = setTimeout(() => {
+      const entry = pending.get(task.id);
       pending.delete(task.id);
       // 任务已过期，必须连同队列里还没下发的那一份一起丢掉。
       // 否则扩展稍后重连轮询时会把它当成新任务执行：调用方早已收到 timeout
       // 并放弃，点击、输入、关闭标签页却在之后某个时刻突然落地。
       const queued = q.indexOf(task);
       if (queued >= 0) { q.splice(queued, 1); }
+      // 已经交给扩展的那一份可能永远不回（扩展死了）：把在飞名额还回。
+      // 迟到的结果会因为没有 pending 记录而被忽略，不会重复计数。
+      releaseInflight(entry);
       resolve({ ok: false, error: 'timeout', browser, hint: '扩展在超时前没有返回结果' });
     }, timeoutMs);
 
-    pending.set(task.id, { resolve, timer, browser });
+    pending.set(task.id, { resolve, timer, browser, sent: false });
     q.push(task);
     flushTasks(browser);
   });
@@ -248,6 +308,7 @@ function recordResult(browser, id, result) {
   clearTimeout(entry.timer);
   pending.delete(id);
   entry.resolve(result ?? { ok: false, error: 'empty_result' });
+  releaseInflight(entry);
   return { resolved: true };
 }
 
@@ -317,6 +378,7 @@ module.exports = {
   pending,
   queueFor,
   queuedCount,
+  inflightFor,
   normalizeBrowser,
   connectedBrowsers,
   orderBrowsers,
