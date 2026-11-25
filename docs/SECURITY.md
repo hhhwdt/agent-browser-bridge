@@ -22,7 +22,7 @@ sandbox, and it does not try to protect you from software you chose to run.
 | Silent operation | Actions mark the tab (badge, favicon dot, title prefix) and show an in-page indicator. There is no unmarked mode. |
 | Result spoofing between browsers | A result is only settled when it comes from the browser the task was sent to — the same rule on `/result` and on WebSocket result frames. |
 | An extension that has not asked for host access to the bridge | Such a request is cross-origin, so Chrome attaches an `Origin` of `chrome-extension://<id>`; the server checks that ID against an allowlist and answers 403. |
-| A second extension that declares host access to `127.0.0.1:18777` | The bridge generates a shared token on first start and requires `X-ABB-Token` on every route. The real extension reads the token from `chrome.storage.local` (pasted in the popup once). A second extension cannot read the token file, so it cannot drive the bridge. |
+| A second extension that declares host access to `127.0.0.1:18777` | The bridge generates a shared token on first start and requires `X-ABB-Token` on every route. The real extension reads the token from `chrome.storage.local` (pasted in the popup once, or obtained from the native messaging host the installer registers). The host manifest lists this extension's ID in `allowed_origins`, so only that extension can ask for the token, and neither a page nor another extension can read the token file. |
 
 **Not defended against**
 

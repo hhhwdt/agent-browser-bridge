@@ -195,10 +195,13 @@ type and key probe read-only first, then act in the one frame that matched.
 **The extension's requests to the bridge carry no `Origin`.** It holds host permission for
 `127.0.0.1:18777`, so its fetches are not CORS requests and Chrome omits the header entirely.
 The bridge requires `X-ABB-Token` on every route except `/health`; the extension reads the token
-from `chrome.storage.local` (pasted in the popup once) and sends it on every poll and result — and,
-on the WebSocket channel, in its first `hello` message, because a browser WebSocket cannot carry
-custom headers. A second extension cannot read the token file, so it cannot drive the bridge. See
-[SECURITY.md](SECURITY.md) for the trust boundary.
+from `chrome.storage.local` — pasted in the popup once, or fetched by `pair.js` from the native
+messaging host the installer registers — and sends it on every poll and result, and on the WebSocket
+channel in its first `hello` message, because a browser WebSocket cannot carry custom headers.
+A second extension cannot read the token file, so it cannot drive the bridge. The native host is
+only reachable by the extension IDs listed in its manifest's `allowed_origins`, so on installed
+machines the browser itself vouches for which extension is asking. See [SECURITY.md](SECURITY.md)
+for the trust boundary.
 
 **Editing the extension requires a reload, and `src/cli.js reload` needs the extension to be alive.**
 That combination is a deadlock: deploy a broken service worker and the only way back is a human

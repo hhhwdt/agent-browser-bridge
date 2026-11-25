@@ -456,8 +456,10 @@ one may already have landed. Both default to off, so existing code behaves exact
 
 ### New in 1.8.0
 
-**Shared token.** The bridge generates a token on first start. Paste it into the extension popup
-once. A second extension cannot read the token file, so it cannot drive the bridge.
+**Shared token.** The bridge generates a token on first start. With the product installer it is
+paired automatically through a native messaging host — the extension asks the browser for the token,
+so nothing is typed. Loading the extension by hand still works: paste the token into the popup once.
+A second extension cannot read the token file, so it cannot drive the bridge.
 
 **Batch actions.** Execute an ordered list of actions in one call:
 
@@ -656,9 +658,10 @@ something in practice:
   not asked for host access to the bridge gets a 403 rather than control of your browser. The
   manifest carries a public key, which is what makes that ID identical across source installs.
 - The bridge requires `X-ABB-Token` on every route except `/health`. The extension reads the token
-  from `chrome.storage.local` (pasted in the popup once). A second extension cannot read the token
-  file, so it cannot drive the bridge. A same-user process can read the token from disk. See
-  [SECURITY.md](docs/SECURITY.md) for the trust boundary.
+  from `chrome.storage.local`: pasted in the popup once, or obtained from the native messaging host
+  the installer registers (the browser vouches for the extension ID through `allowed_origins`).
+  A second extension cannot read the token file, so it cannot drive the bridge. A same-user process
+  can read the token from disk. See [SECURITY.md](docs/SECURITY.md) for the trust boundary.
 - Privileged capabilities are separated: `cookies` is opt-in and off until granted from the popup;
   `debugger`-backed actions are declared required only because Chrome forbids the alternative.
 - Read operations have no side effects. Write operations are risk-classified, and the caller is told

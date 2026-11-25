@@ -87,6 +87,11 @@ reconstructing them from the code alone would be guesswork.
 
 ### Changed
 
+- Token pairing can be zero-input. With the product installer, a native messaging host
+  (`com.abb.bridge`) is registered and the extension asks the browser for the token instead of
+  asking the user to paste it; the host manifest lists this extension's ID, so the browser vouches
+  for who is asking. A rejected token triggers one automatic re-pair per service-worker lifetime.
+  Hand-loaded extensions keep the popup field as the fallback, so nothing changes for them.
 - The dispatch queue drains its whole backlog when a channel is available, and holds back above a
   per-browser in-flight cap (32; `ABB_MAX_INFLIGHT` overrides). Before, one `flushTasks` call sent one
   task, so anything queued behind it waited for another trigger — the extension could sit idle with

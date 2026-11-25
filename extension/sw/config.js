@@ -28,6 +28,15 @@ const BROWSER_NAME = (() => {
 /** 扩展向桥接证明自己身份的请求头名。 */
 const TOKEN_HEADER = 'X-ABB-Token';
 
+/**
+ * native messaging 宿主名。安装器写注册表时用同一个名字（见安装器 README）。
+ * 宿主不存在时 pair.js 静默失败，弹窗仍可手填 token。
+ */
+const NATIVE_HOST_NAME = 'com.abb.bridge';
+
 /* 供其他模块使用 */
-export { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER };
+export {
+  BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS,
+  TOKEN_HEADER, NATIVE_HOST_NAME
+};
 

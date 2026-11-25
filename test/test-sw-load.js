@@ -116,6 +116,7 @@ const EXPECTED = {
   'guards.js': ['withTimeout', 'tabUnresponsive', 'injectAndPick', 'injectInBestFrame', 'resolveTab', 'ensureInjectable'],
   // applyBadge 只在本模块内部用，刻意不导出
   'marks.js': ['loadMarks', 'saveMarks', 'removeBadge', 'markTab', 'markTask', 'unmarkTask', 'collectMarkedTabs'],
+  'pair.js': ['pairIfNeeded', 'readStoredToken', 'repairAfterRejected'],
   'actions.js': [
     'listTabs', 'readTab', 'linksTab', 'clickTab', 'typeTab', 'keyTab', 'navigateTab', 'waitTab',
     'screenshotTab', 'evalTab', 'sessionTab', 'uploadTab', 'downloadTab', 'saveTab', 'grabTab',

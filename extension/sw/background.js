@@ -13,6 +13,7 @@
 import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
 import { MARKS_KEY, collectMarkedTabs, forgetTab, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
 import { startWs, retryWs, wsConnected, wsState, sendResult } from './ws.js';
+import { pairIfNeeded, repairAfterRejected } from './pair.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
 
 let loopRunning = false;
@@ -266,8 +267,10 @@ async function pollOnce() {
   });
 
   if (res.status === 401) {
-    // token 无效或缺失：不重试，等用户在弹窗里更新
-    console.warn('[abb] token 被拒绝（401），请在扩展弹窗里更新 token');
+    // token 无效或缺失：先尝试向本机宿主要一份新的（安装器装好的机器上零输入），
+    // 没装宿主就保持原状，等用户在弹窗里手动填。
+    console.warn('[abb] token 被拒绝（401），尝试自动重新配对');
+    repairAfterRejected().catch(() => { /* 配对失败按原逻辑等待人工处理 */ });
     return { authFailed: true };
   }
   if (res.status === 204) {
@@ -352,7 +355,8 @@ async function pollLoop() {
         }
         const result = await pollOnce();
         if (result && result.authFailed) {
-          // token 被拒绝：不重试，等用户在弹窗里更新
+          // 401 时 pollOnce 已经尝试过自动重新配对；这里按原逻辑停下，
+          // 让配对结果通过 storage 变更把 WS 拉起来。仍然不行就等人工填 token。
           console.warn('[abb] 轮询停止：token 被拒绝（401）');
           break;
         }
@@ -461,13 +465,23 @@ try {
   logError('runtime.onMessage', e);
 }
 
-function bootstrap() {
+async function bootstrap() {
   bumpBootCount();
   try {
     loadMarks();
   } catch (e) {
     logError('bootstrap.loadMarks', e);
   }
+
+  // 先配对再连：没有 token 时第一条请求必然 401，会白白把轮询停掉一轮。
+  // 装过安装器的机器上这一步是零输入的（native messaging）；没装宿主时静默失败，
+  // 行为与以前一致——弹窗手填。
+  try {
+    await pairIfNeeded();
+  } catch (e) {
+    logError('bootstrap.pair', e);
+  }
+
   pollLoop();
 
   // WebSocket 任务通道。任务推进 WS 后由 onTask 走与轮询完全相同的处理路径
