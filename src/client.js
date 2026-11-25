@@ -95,12 +95,14 @@ class BrowserBridgeClient {
    * @param {number}  [options.port=18777]
    * @param {number}  [options.timeoutMs=30000] 单次请求默认超时
    * @param {string}  [options.token] 显式指定共享 token；省略时自动读配置目录下的 token 文件
+   * @param {string}  [options.agent] 调用方身份（写进 X-ABB-Agent，桌面写锁与审计按它区分）
    */
   constructor(options = {}) {
     this.host = options.host || DEFAULT_HOST;
     this.port = options.port || DEFAULT_PORT;
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
     this.token = options.token !== undefined ? options.token : readLocalToken();
+    this.agent = options.agent || '';
   }
 
   /** 低层请求。返回 { status, data }。 */
@@ -112,6 +114,7 @@ class BrowserBridgeClient {
 
       const headers = {};
       if (this.token) { headers['X-ABB-Token'] = this.token; }
+      if (this.agent) { headers['X-ABB-Agent'] = this.agent; }
       if (payload) {
         headers['Content-Type'] = 'application/json';
         headers['Content-Length'] = payload.length;
@@ -599,6 +602,111 @@ class BrowserBridgeClient {
       steps,
       continueOnError: !!options.continueOnError
     }, options.timeoutMs || 60000);
+  }
+
+  // ---- computer 桌面控制（仅 Windows 本机执行，不经扩展）----
+  // 方法名与注册表动作一一对应，参数原样转交，缺省超时来自注册表 timeout。
+
+  /** 截取整个桌面，或按区域/窗口截取。 */
+  computerScreen(options = {}) {
+    return this.action('computerScreen', options);
+  }
+
+  /** 列出可见顶层窗口。 */
+  computerWindows(options = {}) {
+    return this.action('computerWindows', options);
+  }
+
+  /** 窗口动作：activate / minimize / maximize / close（close 需 force）。 */
+  computerWindow(options = {}) {
+    return this.action('computerWindow', options);
+  }
+
+  /** 鼠标点击屏幕坐标。 */
+  computerClick(options = {}) {
+    return this.action('computerClick', options);
+  }
+
+  /** 鼠标移动（不点击）。 */
+  computerMove(options = {}) {
+    return this.action('computerMove', options);
+  }
+
+  /** 按住左键从起点拖到终点。 */
+  computerDrag(options = {}) {
+    return this.action('computerDrag', options);
+  }
+
+  /** 滚轮滚动。 */
+  computerScroll(options = {}) {
+    return this.action('computerScroll', options);
+  }
+
+  /** 向焦点窗口键入文本。 */
+  computerType(options = {}) {
+    return this.action('computerType', options);
+  }
+
+  /** 向焦点窗口派发按键/组合键。 */
+  computerKey(options = {}) {
+    return this.action('computerKey', options);
+  }
+
+  /** 读取（默认）或写入剪贴板。 */
+  computerClipboard(options = {}) {
+    return this.action('computerClipboard', options);
+  }
+
+  /** 执行 PowerShell 命令（白名单外需 force）。 */
+  computerShell(options = {}) {
+    return this.action('computerShell', options);
+  }
+
+  /** 列出进程（list，默认）或按 pid 终止（kill 需 force）。 */
+  computerProcess(options = {}) {
+    return this.action('computerProcess', options);
+  }
+
+  /** 弹 Windows 通知。 */
+  computerNotify(options = {}) {
+    return this.action('computerNotify', options);
+  }
+
+  /** 音量读取/设置与媒体键。 */
+  computerMedia(options = {}) {
+    return this.action('computerMedia', options);
+  }
+
+  /** 读取窗口的 UIA 控件树。 */
+  computerTree(options = {}) {
+    return this.action('computerTree', options);
+  }
+
+  /** 按控件属性查找（name / automationId / controlType / className）。 */
+  computerFind(options = {}) {
+    return this.action('computerFind', options);
+  }
+
+  /** 对控件执行 UIA 动作（invoke / setValue / getValue / click 等）。 */
+  computerAct(options = {}) {
+    return this.action('computerAct', options);
+  }
+
+  /** 等控件出现、消失、可用或文本变成期望值。 */
+  computerWaitFor(options = {}) {
+    return this.action('computerWaitFor', options);
+  }
+
+  /**
+   * 批量执行桌面动作，共享一次桌面写锁。
+   *
+   * @param {object} options
+   * @param {Array<{action: string, params?: object}>} options.ops 动作列表
+   * @param {number} [options.waitMs] 桌面被占用时排队毫秒数
+   * @param {boolean} [options.stopOnError=true] 某步失败后是否停止
+   */
+  computerBatch(options = {}) {
+    return this.action('computerBatch', options);
   }
 }
 

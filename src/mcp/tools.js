@@ -43,7 +43,19 @@ const INSTRUCTIONS = [
     + '并让用户确认；只有确认过才传 force=true。',
   '6. browser_type 只写内容不提交，提交必须单独一个 browser_click——这让用户有机会在提交前看一眼。',
   '7. 页面异步刷新后先 browser_wait_for，否则下一步会随机失败。',
-  '8. 写共享文档、生产系统，或任何有真实的人在另一头看到的系统之前，先向用户确认。'
+  '8. 写共享文档、生产系统，或任何有真实的人在另一头看到的系统之前，先向用户确认。',
+  '',
+  '桌面控制（computer_*，仅 Windows 本机执行，不经浏览器）：',
+  '1. 点击/键入前先 computer_screen 看屏幕、computer_windows 拿窗口坐标，不凭记忆给坐标。',
+  '2. computer_type / computer_key 发给"当前焦点窗口"，会落到用户正在用的程序上；'
+    + '先 computer_window activate 目标窗口再输入。',
+  '3. UAC 弹窗、锁屏、Windows Hello 一律点不了，别尝试；DirectInput 游戏不响应注入。',
+  '4. computer_shell 白名单外、computer_window action=close、computer_process mode=kill、'
+    + 'computer_clipboard action=write 都需要 force=true，一律先向用户确认再传。',
+  '5. 截图是桌面图像，里面可能有用户正在看的内容；给用户的回复里注意脱敏。',
+  '6. 多步连续操作（点一下、等一下、再输入）用 computer_batch 一次下发：整批只取一次桌面写锁，'
+    + '不会中途被其他 agent 插入。',
+  '7. 另一个 agent 正在操作桌面时会收到 desktop_busy；等对方结束或传 waitMs 排队，不要反复重试。'
 ].join('\n');
 
 module.exports = {

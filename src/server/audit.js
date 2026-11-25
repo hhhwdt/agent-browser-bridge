@@ -21,7 +21,7 @@ const AUDIT_LOG_CAP = 10 * 1024 * 1024;
  * 不记录审计日志的动作：查询与诊断类，不是"对页面做了什么"。
  * tabs/frames/media 是查询，diag 是扩展自检，都不算用户动作。
  */
-const AUDIT_SKIP = new Set(['tabs', 'frames', 'media', 'diag']);
+const AUDIT_SKIP = new Set(['tabs', 'frames', 'media', 'diag', 'computerWindows']);
 
 /**
  * 写一条审计日志。

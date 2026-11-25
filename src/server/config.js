@@ -60,7 +60,7 @@ const RESULT_MAX_BODY = 32 * 1024 * 1024;
  * 对外接口版本。新增能力时递增次版本，破坏性变更时递增主版本。
  * 其他 agent 可先读 /health 的 apiVersion 与 capabilities 再决定调用方式。
  */
-const API_VERSION = '1.0';
+const API_VERSION = '1.3';
 
 /** 本服务提供的能力清单，供调用方做特性探测。 */
 const CAPABILITIES = [
@@ -87,7 +87,26 @@ const CAPABILITIES = [
   'media',        // 枚举页面媒体候选
   'grab',         // 抓取受防盗链/CORS 保护的媒体
   'reload',       // 重新加载扩展自身（开发用）
-  'multiBrowser'  // 多浏览器隔离与路由
+  'multiBrowser', // 多浏览器隔离与路由
+  'computerScreen',    // 桌面/窗口截图（Windows，本地执行）
+  'computerWindows',   // 列出顶层窗口
+  'computerWindow',    // 窗口动作（activate/minimize/maximize/close 需确认）
+  'computerClick',     // 鼠标点击
+  'computerMove',      // 鼠标移动
+  'computerDrag',      // 拖拽
+  'computerScroll',    // 滚轮
+  'computerType',      // 键入文本
+  'computerKey',       // 组合键
+  'computerClipboard', // 剪贴板（write 需确认）
+  'computerShell',     // PowerShell 执行（白名单外需确认）
+  'computerProcess',   // 进程清单/终止（kill 需确认）
+  'computerNotify',    // Windows 通知
+  'computerMedia',     // 音量与媒体控制
+  'computerTree',      // UIA 控件树
+  'computerFind',      // UIA 查找控件
+  'computerAct',       // UIA 控件操作
+  'computerWaitFor',   // UIA 等待控件状态
+  'computerBatch'      // 批量执行，共享一次桌面写锁
 ];
 
 module.exports = {

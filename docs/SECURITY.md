@@ -39,6 +39,12 @@ sandbox, and it does not try to protect you from software you chose to run.
   and extension IDs must match the server allowlist, so a page cannot enter the task queue by
   connecting to `ws://127.0.0.1:18777/ws`.
 - **The user.** Nobody is protected from the operator of the machine.
+- **What a leaked token is worth.** `computer_*` actions do not go through the extension: the bridge
+  performs them itself under your account — screen capture, mouse and keyboard input into whatever
+  window has focus, clipboard writes, and one-shot PowerShell. The same `X-ABB-Token` that drives a
+  tab also drives the machine, so a copied token file is no longer "someone can automate your
+  browser", it is "someone can run commands and type into your applications". The `force` gate below
+  is a guard rail against an agent acting unasked, not a boundary against whoever holds the token.
 
 ## Sharp edges
 
@@ -54,6 +60,39 @@ about before granting anything:
 - `grab` attaches the debugger and injects a permissive CORS header for one origin for the duration
   of a single call, then detaches.
 - `debugger`-backed actions (screenshot, upload, grab) conflict with DevTools on the same tab.
+- Desktop actions are gated per call, not per session. Closing a window, killing a process, writing
+  the clipboard and any shell command outside the read-only allowlist return `confirm_required`
+  until the caller passes `force: true`. There is no separate approval UI — the confirmation is the
+  caller's responsibility, so only give `computer_*` tools to an agent you would let type on your
+  desktop.
+- The persistent desktop host keeps C# interop types and screen metrics loaded in a long-lived
+  `powershell.exe`. It inherits the bridge's account and token, runs only the fixed capability
+  functions from `src/computer/host/lib/`, and exits when the server closes its stdin. A command that
+  exceeds its timeout is not cancelled: the host is killed (`taskkill /T /F`) and restarted, and
+  in-flight calls fail with `host_restarted`.
+- The desktop write lock (`X-ABB-Agent`) prevents two agents from interleaving mouse and keyboard
+  input. It is a coordination mechanism, not an authorisation boundary: any caller with the token may
+  claim any agent name, and a batch holds the lock for its whole duration, including long shell
+  commands inside it.
+- `computer_screen` returns whatever is on screen, password managers included. The bytes go back to
+  the caller exactly as captured. For unattended deployments, capture a specific window with `hwnd`
+  rather than the whole desktop.
+- `computer_key` and `computer_type` use SendInput: the focused application cannot tell them apart
+  from your own typing.
+- `computer_getValue` (through `computer_act`) returns control text, which may include whatever the
+  window is showing — account names, paths, message bodies. It is a read, so it takes no write lock
+  and is not gated by `force`; treat the output as sensitive.
+- UIA element refs are shared state inside host 0, not per-caller capabilities. Any agent holding the
+  token can act on a ref another agent obtained, and refs from a finished task remain valid until the
+  TTL expires or the control is rebuilt.
+- `desktop-policy.json` is an authorisation decision, not a safety net. Putting an action in
+  `allowForce` means that agent may do it unattended with no confirmation; putting `computerShell`
+  there (without `shellAllow` or with a broad pattern) is equivalent to handing it a shell. Keep the
+  file writable only by the account that runs the bridge, and prefer `deny` plus narrow `shellAllow`
+  patterns. `deny` cannot be overridden by `force`.
+- `requestId` replay stores the full response in memory for 10 minutes, keyed by agent. A response to
+  `getValue` or a screen capture is therefore kept in the server process for that window; the store
+  is bounded to 200 entries and is not written to disk.
 
 ## Keeping a deployment safe
 

@@ -8,6 +8,117 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [Unreleased]
+
+### Added
+
+- Desktop control on Windows (`computer_*`): eighteen actions executed by the bridge itself, outside
+  the extension — screen capture (every monitor, one window through PrintWindow, or a rectangle),
+  window listing plus activate/minimize/maximize/close, mouse move/click/drag/scroll, Unicode typing
+  and key combos, clipboard text, one-shot PowerShell with merged output, process listing and
+  termination, Windows toasts, master volume plus media keys, and UIA control-level actions
+  (tree, find, act, wait).
+- Safety gate: closing a window, killing a process, writing the clipboard and shell commands outside
+  the read-only allowlist answer `400 confirm_required` unless the call carries `force: true`. The
+  allowlist is single-token read-only commands with no pipe, redirection or subexpression. MCP
+  callers get the same `force` parameter and are told, in the tool description, to ask first.
+- Desktop actions share the bridge's token and audit trail. The audit entry records only the shape of a
+  call — action, coordinates, lengths, `force`, calling agent — never clipboard text, typed text, shell
+  commands or window titles; `API_VERSION` is 1.3 and `CAPABILITIES` lists the eighteen `computer*`
+  entries plus `computerBatch`.
+- Persistent desktop host. Actions no longer spawn a `powershell.exe` each: one long-lived host loads
+  the interop types, screen metrics and command loop once, then answers JSON lines. Measured p95 is
+  about 1 ms per call (previously ~330 ms), and the host is killed and restarted automatically when a
+  command times out or the process dies. `ABB_DESKTOP_SPAWN=1` keeps the old per-call path,
+  `ABB_DESKTOP_HOSTS` sets the pool size (default 2).
+- `computer_batch` runs up to 50 actions under one desktop lock, with per-step results and
+  `stopOnError` semantics, so multi-step flows no longer pay an HTTP round trip per step.
+- Control-level actions through UI Automation: `computer_tree` reads a window's control view,
+  `computer_find` locates controls by name / automationId / role / class, `computer_act` runs
+  invoke / toggle / setValue / getValue / select / expand / collapse / focus / scrollIntoView / click
+  through the control's own pattern (no mouse movement, no focus change), and `computer_wait_for`
+  waits for existence, disappearance, enablement or an expected value.
+- Element refs are host-process scoped, so UIA calls are pinned to host 0 while other reads still
+  spread across the pool. A ref whose element was rebuilt is re-resolved by its path plus a
+  controlType/automationId/name fingerprint before answering `element_stale`; failures carry a
+  Chinese hint. `setValue` only writes — submitting is a separate `invoke`.
+- `test/test-computer-uia.js` launches a local WPF window on isolated port 18998 and covers tree
+  depth/limits, find filters, setValue/getValue, wait success and timeout, invoke, stale refs,
+  unsupported patterns and audit shape (text never reaches the log).
+- Desktop write lock and agent identity: input, clicks, window actions and clipboard writes are
+  serialised; `X-ABB-Agent` names the caller, the same agent is re-entrant, a conflicting one gets
+  `409 desktop_busy` with the holder, and `waitMs` queues. `/health` reports host and lock state.
+- `test/test-desktop-broker.js` pins lock semantics offline; `test/test-desktop-host.js` measures the
+  host hot path and restart behaviour. `test/test-computer.js` gained batch and two-agent lock checks.
+- Desktop policy file for unattended runs (`<configDir>/desktop-policy.json`, or the
+  `ABB_DESKTOP_POLICY` path): per-agent `allowForce`, `deny`, `readOnly` and `shellAllow`. `deny`
+  wins over `force`; a `readOnly` agent can only read; `allowForce` removes the confirmation for the
+  listed actions, and `computerShell` additionally has to match a `shellAllow` regex. Reloaded on
+  mtime change, and a broken edit keeps the last good rules with the error exposed in `/health`.
+- Idempotent retries: computer routes accept `requestId` (1-64 characters), keyed by
+  `X-ABB-Agent`. A repeat within 10 minutes replays the stored response, a concurrent repeat waits
+  for the original, and the store is bounded to 200 entries. In memory only.
+- `/health` now reports `desktopPolicy`, `desktopMetrics` (calls, failures, p95, per-action
+  counters) and `desktopIdempotency` (hits, waits, entries).
+- `scripts/supervise-server.ps1` polls `/health` and calls `restart-server.ps1` after three
+  consecutive failures, logging to `logs/supervisor.log`.
+- `test/test-desktop-runtime.js` pins policy, idempotency and metrics offline;
+  `test/test-desktop-soak.js` hammers the host for a configurable duration (`ABB_SOAK_SECONDS`,
+  default 60 s) and reports failure rate, latency percentiles and host memory growth.
+- `test/test-computer-policy.js` (offline) pins the gate and key parsing; `test/test-computer.js`
+  (live, Windows) exercises a real desktop on isolated port 18997, restores the clipboard it
+  overwrites, checks policy denial and `requestId` replay, and skips key injection unless
+  `ABB_COMPUTER_KEY_TEST=1`.
+- Honest clicks on the real desktop: every `computer_click` answer carries `hitWindow` — the actual
+  top-level window the point landed on (hwnd, process, title, bounds) — so a click aimed at a covered
+  window cannot be mistaken for a success. With `ensureForeground: true` the host activates the
+  window under the point first, verifies it is really foreground, and cancels the click as
+  `not_foreground` / `click_no_target` instead of firing blind into whatever happens to be on top.
+- `computer_window activate` verifies through `GetForegroundWindow` and returns `foreground: true/false`
+  instead of trusting `SetForegroundWindow`'s return value alone.
+- Window captures refuse to guess: a title substring that matches several windows answers
+  `ambiguous_window` with the hwnd/pid/size candidates (capture with `hwnd` instead), and a window
+  screenshot that comes back a flat single color carries `blank: true` plus a warning instead of
+  looking like a real frame.
+- Empty `computer_tree` results now carry `diagnostics` (root readable? framework, class, offscreen)
+  with a hint pointing self-drawn / unreadable contexts at the screenshot+coordinates route.
+- Keyboard whitelist covers F13–F24 so key-combo tests can use inert preserved keys; the opt-in
+  `ABB_COMPUTER_KEY_TEST=1` section of `test/test-computer.js` runs a three-modifier combo end to end.
+
+### Changed
+
+- Restart is no longer paid by the first task. The server starts the host pool as soon as it listens
+  (`ABB_DESKTOP_WARM=0` goes back to lazy start) and then pre-compiles the `windows` and `uia`
+  capability libraries on every host, so the first desktop action lands on a warm process instead of
+  waiting ~1 s for a handshake plus assembly compilation.
+- Host capability libraries load on the matching fn's first use instead of at startup. A host cold
+  start dropped from ~0.9 s to ~0.4 s because UIA's assemblies and System.Drawing load only when
+  needed; ping stays instant. A long-idle host answers its first call 100-200 ms slower (page-in),
+  which `computer_batch` amortises.
+
+### Fixed
+
+- Desktop coordinates are physical pixels throughout: the input, window and capture hosts now call
+  `SetProcessDPIAware` before touching screen metrics. Without it a scaled display (150%/200%)
+  produced virtualised window bounds and a smaller virtual desktop, so a click aimed with screenshot
+  coordinates landed at half the distance.
+- `computer_key` combos crashed twice over: `[ushort]` does not exist as a type accelerator in
+  Windows PowerShell 5.1 (it is `[uint16]`), and the C# `Combo()` sized its INPUT array for
+  `mods + taps*2` while it writes `mods*2 + taps*2` events — pressing Ctrl+Alt+W overran into an
+  index exception. Both were found by a real hotkey run because the key path was the one live path
+  nobody exercised; it now has a gated test.
+- The UIA tree walker no longer discards readable subtrees when an ancestor's properties cannot be
+  read (self-drawn UI, permission mismatch) or the ancestor is filtered off-screen: such elements
+  only skip their own row now, not their whole branch.
+- Desktop region and full-screen captures skipped WS_EX_LAYERED windows: `Graphics.CopyFromScreen`
+  ran with plain SRCCOPY, so layered surfaces (WeChat 4.x main window among them) vanished from the
+  image while `SetForegroundWindow` said they were in front. Captures now include the CAPTUREBLT
+  bit.
+- PowerShell host scripts write UTF-8 with a BOM and a trailing newline; the result reader strips
+  both instead of failing every call with `host_result_unreadable`.
+- A host script that exits without writing its result file now reports `host_no_result` with the
+  exit code and stderr tail, rather than an unreadable-file error that names no cause.
+
 ## [1.9.0] - 2026-10-21
 
 ### Added

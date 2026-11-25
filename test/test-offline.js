@@ -43,6 +43,10 @@ const SUITES = [
   ['冻结标签页恢复提示', 'test-frozen-tab.js'],
   ['批量动作', 'test-batch.js'],
   ['Per-tab lease', 'test-lease.js'],
+  ['computer 门禁与键名解析', 'test-computer-policy.js'],
+  ['桌面写锁与 agent 身份', 'test-desktop-broker.js'],
+  ['常驻桌面宿主（需 Windows）', 'test-desktop-host.js'],
+  ['桌面策略、幂等与指标', 'test-desktop-runtime.js'],
   ['MCP 协议（自己充当客户端）', 'test-mcp.js']
 ];
 

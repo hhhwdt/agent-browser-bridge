@@ -295,6 +295,266 @@ const HANDLERS = {
       lines.push(`扩展诊断读取失败: ${e.code || e.message}`);
     }
     return text(lines.join('\n'));
+  },
+
+  /* ---------------------------------------------------------------- *
+   * computer 桌面控制（Windows 本地执行）。走 ab.computerXxx 动作族，
+   * 错误翻译沿用 callTool 的 BridgeError 分支，这里只拼人话结果。
+   * ---------------------------------------------------------------- */
+
+  async computer_screen(a) {
+    const d = await ab.computerScreen({
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      region: a.region
+    });
+    const meta = `${d.mode === 'window' ? '窗口截图' : '桌面截图'}  ${d.width}x${d.height}  ${(d.bytes / 1024).toFixed(0)}KB`;
+    const base64 = String(d.dataUrl || '').replace(/^data:image\/\w+;base64,/, '');
+    if (!base64) { return text(meta + '\n（没有拿到图像数据）'); }
+    if (base64.length > IMAGE_MAX_BYTES) {
+      return text(`${meta}\n图像约 ${(base64.length / 1024 / 1024).toFixed(1)}MB，太大，未返回。`
+        + '请用 region 只截需要的区域，或 windowTitle 只截目标窗口。');
+    }
+    return {
+      content: [
+        { type: 'text', text: meta },
+        { type: 'image', data: base64, mimeType: 'image/png' }
+      ]
+    };
+  },
+
+  async computer_windows() {
+    const d = await ab.computerWindows();
+    if (!d.windows.length) { return text('没有发现可见窗口。'); }
+    return text(`${d.windows.length} 个窗口：\n` + d.windows.map((w) => {
+      const flags = [
+        w.minimized ? '最小化' : null,
+        w.maximized ? '最大化' : null,
+        w.visible ? null : '隐藏'
+      ].filter(Boolean).join('/');
+      return `[${w.index}] hwnd=${w.hwnd}  ${w.process}(pid ${w.pid})  ${flags ? `(${flags}) ` : ''}${w.title}\n`
+        + `      ${w.bounds.x},${w.bounds.y} ${w.bounds.w}x${w.bounds.h}`;
+    }).join('\n'));
+  },
+
+  async computer_window(a) {
+    const d = await ab.computerWindow({ action: a.action, title: a.title, pid: a.pid, force: a.force });
+    const names = { activate: '已到前台', minimize: '已最小化', maximize: '已最大化', close: '已请求关闭' };
+    return text(`${names[a.action] || a.action}: ${d.title || d.hwnd}`);
+  },
+
+  async computer_click(a) {
+    await ab.computerClick({ x: a.x, y: a.y, button: a.button, double: a.double });
+    return text(`已在 (${a.x}, ${a.y})${a.button && a.button !== 'left' ? ' ' + a.button + '键' : ''}${a.double ? ' 双击' : ''}。`
+      + '建议回头截图确认点对地方。');
+  },
+
+  async computer_move(a) {
+    await ab.computerMove({ x: a.x, y: a.y });
+    return text(`鼠标已移到 (${a.x}, ${a.y})。`);
+  },
+
+  async computer_drag(a) {
+    await ab.computerDrag({ x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, steps: a.steps, stepMs: a.stepMs });
+    return text(`已从 (${a.x1}, ${a.y1}) 拖到 (${a.x2}, ${a.y2})。`);
+  },
+
+  async computer_scroll(a) {
+    await ab.computerScroll({ amount: a.amount, x: a.x, y: a.y });
+    return text(`已滚动 ${a.amount || -3} 格${a.x != null ? `（位置 ${a.x}, ${a.y}）` : ''}。`);
+  },
+
+  async computer_type(a) {
+    const d = await ab.computerType({ text: a.text });
+    return text(`已键入 ${d.chars ? d.chars + ' 字符（发到当前焦点窗口）。' : '空文本，未发送。'}`);
+  },
+
+  async computer_key(a) {
+    await ab.computerKey({ key: a.key });
+    return text(`已派发按键 ${a.key}（发到当前焦点窗口）。`);
+  },
+
+  async computer_clipboard(a) {
+    if (a.action === 'write') {
+      await ab.computerClipboard({ action: 'write', text: a.text, force: a.force });
+      return text('已写入剪贴板。');
+    }
+    const d = await ab.computerClipboard({ action: 'read' });
+    const t = d.text == null ? '' : String(d.text);
+    return text(`剪贴板（${d.length || 0} 字符${d.truncated ? '，已截断' : ''}）:\n${t.slice(0, 4000)}`);
+  },
+
+  async computer_shell(a) {
+    const d = await ab.computerShell({ command: a.command, timeoutMs: a.timeoutMs, force: a.force });
+    const lines = [
+      `exit=${d.exitCode}  耗时 ${d.durationMs}ms  输出 ${(d.stdout || '').length} 字符`
+    ];
+    lines.push('---');
+    lines.push(String(d.stdout || '').slice(0, 8000) || '（无输出）');
+    return text(lines.join('\n'));
+  },
+
+  async computer_process(a) {
+    if (a.mode === 'kill') {
+      await ab.computerProcess({ mode: 'kill', pid: a.pid, force: a.force });
+      return text(`已请求终止 pid=${a.pid}。`);
+    }
+    const d = await ab.computerProcess({ mode: 'list' });
+    const rows = d.processes || [];
+    // ConvertTo-Json 输出的键名大小写取决于 PowerShell 侧，两种形状都伺候
+    return text(`${rows.length} 个进程：\n` + rows.map((p) => {
+      const name = p.ProcessName || p.processName || '';
+      const mem = p.memMb != null ? p.memMb : '?';
+      return `${p.Id || p.id || p.pid}  ${name}  ${mem}MB`;
+    }).join('\n'));
+  },
+
+  async computer_notify(a) {
+    const d = await ab.computerNotify({ title: a.title, message: a.message });
+    if (d.ok === false) {
+      return text(`通知失败: ${d.error}${d.detail ? '  ' + d.detail : ''}`);
+    }
+    return text('已弹出 Windows 通知。');
+  },
+
+  async computer_media(a) {
+    const d = await ab.computerMedia({ op: a.op, volume: a.volume });
+    const parts = [];
+    if (d.volumePercent != null) { parts.push(`音量 ${d.volumePercent}%`); }
+    if (d.muted != null) { parts.push(d.muted ? '已静音' : '未静音'); }
+    if (a.op && a.op !== 'get' && a.op !== 'volume') { parts.push(`已执行 ${a.op}`); }
+    return text(parts.join('  ') || '完成。');
+  },
+
+  async computer_tree(a) {
+    const d = await ab.computerTree({
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      pid: a.pid,
+      depth: a.depth,
+      maxNodes: a.maxNodes,
+      includeOffscreen: a.includeOffscreen,
+      patterns: a.patterns
+    });
+    const nodes = d.nodes || [];
+    const lines = [`窗口「${d.title || ''}」  ${d.count} 个控件`
+      + `${d.truncated ? '（已截断，用 computer_find 缩小范围）' : ''}`];
+    for (const n of nodes) {
+      if (lines.length > 180) {
+        lines.push('...（输出过长，剩余节点未列出）');
+        break;
+      }
+      const flags = [];
+      if (!n.enabled) { flags.push('disabled'); }
+      if (n.offscreen) { flags.push('offscreen'); }
+      if (n.focused) { flags.push('focused'); }
+      const id = n.automationId ? ` id=${n.automationId}` : '';
+      const b = n.bounds ? ` @${n.bounds.x},${n.bounds.y} ${n.bounds.w}x${n.bounds.h}` : '';
+      const name = String(n.name || '').replace(/\s+/g, ' ').slice(0, 60);
+      const pat = n.patterns && n.patterns.length ? ` [${n.patterns.join(',')}]` : '';
+      lines.push(`${'  '.repeat(Math.min(n.depth, 12))}[${n.ref}] ${n.controlType} "${name}"${id}${b}${pat}`
+        + (flags.length ? ` (${flags.join(',')})` : ''));
+    }
+    return text(lines.join('\n'));
+  },
+
+  async computer_find(a) {
+    const d = await ab.computerFind({
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      pid: a.pid,
+      name: a.name,
+      nameExact: a.nameExact,
+      automationId: a.automationId,
+      controlType: a.controlType,
+      className: a.className,
+      maxResults: a.maxResults,
+      depth: a.depth,
+      includeOffscreen: a.includeOffscreen,
+      patterns: a.patterns
+    });
+    const rows = d.matches || [];
+    if (rows.length === 0) {
+      return text(`窗口「${d.title || ''}」里没有匹配的控件（扫描 ${d.visited} 个节点）。`);
+    }
+    const lines = [`窗口「${d.title || ''}」匹配 ${rows.length} 个`
+      + `${d.truncated ? '（可能还有更多，用 depth/maxResults 调整）' : ''}`];
+    for (const n of rows) {
+      const id = n.automationId ? ` id=${n.automationId}` : '';
+      const b = n.bounds ? ` @${n.bounds.x},${n.bounds.y} ${n.bounds.w}x${n.bounds.h}` : '';
+      const name = String(n.name || '').replace(/\s+/g, ' ').slice(0, 80);
+      const pat = n.patterns && n.patterns.length ? ` [${n.patterns.join(',')}]` : '';
+      lines.push(`[${n.ref}] ${n.controlType} "${name}"${id}${b}${pat}`);
+    }
+    return text(lines.join('\n'));
+  },
+
+  async computer_act(a) {
+    const d = await ab.computerAct({
+      ref: a.ref,
+      action: a.action,
+      text: a.text,
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      name: a.name,
+      automationId: a.automationId,
+      controlType: a.controlType,
+      className: a.className,
+      requestId: a.requestId
+    });
+    const parts = [`${d.action || a.action} 完成`, `ref=${d.ref || a.ref || '?'}`];
+    if (d.method) { parts.push(`方式 ${d.method}`); }
+    if (d.reResolved) { parts.push('原 ref 已失效，按选择器重新定位'); }
+    if (d.state) { parts.push(`状态 ${d.state}`); }
+    if (d.textChars !== undefined) { parts.push(`写入 ${d.textChars} 字符`); }
+    if (d.value !== undefined) {
+      const value = String(d.value);
+      parts.push(`文本：${value.slice(0, 2000)}${value.length > 2000 ? '…' : ''}`);
+    }
+    return text(parts.join('  '));
+  },
+
+  async computer_wait_for(a) {
+    const d = await ab.computerWaitFor({
+      ref: a.ref,
+      condition: a.condition,
+      value: a.value,
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      name: a.name,
+      automationId: a.automationId,
+      controlType: a.controlType,
+      className: a.className,
+      timeoutMs: a.timeoutMs,
+      intervalMs: a.intervalMs
+    });
+    return text(`${d.condition} 已满足（${d.elapsedMs}ms）`
+      + (d.ref ? `  ref=${d.ref}` : ''));
+  },
+
+  async computer_batch(a) {
+    const d = await ab.computerBatch({
+      ops: a.ops,
+      waitMs: a.waitMs,
+      stopOnError: a.stopOnError,
+      requestId: a.requestId
+    });
+    const results = d.results || [];
+    const okCount = results.filter((r) => r.ok).length;
+    const lines = [`${results.length} 个动作，${okCount} 个成功`];
+    results.forEach((r, i) => {
+      if (r.skipped) {
+        lines.push(`${i + 1}. ${r.action}  跳过`);
+        return;
+      }
+      if (r.ok) {
+        lines.push(`${i + 1}. ${r.action}  ok`);
+        return;
+      }
+      lines.push(`${i + 1}. ${r.action}  失败: ${r.error || 'unknown'}`
+        + (r.hint ? '  ' + r.hint : ''));
+    });
+    return text(lines.join('\n'));
   }
 };
 

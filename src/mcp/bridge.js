@@ -6,6 +6,6 @@
 
 const { createClient } = require('../client.js');
 
-const ab = createClient();
+const ab = createClient({ agent: process.env.ABB_AGENT || 'mcp' });
 
 module.exports = { ab };

@@ -123,6 +123,97 @@ sequenceDiagram
 
 Chrome 与 Edge 可同时使用，彼此完全隔离，且自动选路。
 
+### 桌面控制（Windows）
+
+桥接也能直接操作本机桌面，不经过扩展。18 个动作，外加一个批量入口：
+
+| 能力 | 说明 |
+|---|---|
+| `computer_screen` | 整桌面（全显示器）、指定窗口（PrintWindow，含硬件加速内容）或矩形区域截图；标题匹配到多个窗口时报 `ambiguous_window`（改传 hwnd），窗口截到纯色图时返回 `blank: true` 警告 |
+| `computer_windows` | 列出可见顶层窗口：标题、进程、pid、位置尺寸、最小化/最大化 |
+| `computer_window` | 窗口 activate / minimize / maximize / close；activate 会用 `GetForegroundWindow` 复核并返回 `foreground` 字段 |
+| `computer_click` `computer_move` `computer_drag` `computer_scroll` | 鼠标按虚拟桌面坐标操作；click 返回 `hitWindow`（点击点实际命中的顶层窗口），带 `ensureForeground: true` 时先抬窗、核实前台、失败即取消 |
+| `computer_type` `computer_key` | 键入文本（Unicode）、派发按键与组合键（Ctrl/Shift/Alt/Win） |
+| `computer_clipboard` | 读写剪贴板纯文本 |
+| `computer_shell` | 执行一条 PowerShell 命令，取回合并输出与退出码 |
+| `computer_process` | 列出进程，或终止指定 pid |
+| `computer_notify` | 弹 Windows 通知 |
+| `computer_media` | 读写系统主音量、静音，以及播放/暂停/切歌等媒体键 |
+| `computer_tree` `computer_find` | 读窗口的 UIA 控件树，或按名称 / automationId / 角色 / 类名找控件，返回 ref；树为空时带 `diagnostics` 说明根控件是否可读与框架类型 |
+| `computer_act` | 对控件执行 invoke / toggle / setValue / getValue / select / expand / collapse / focus / scrollIntoView / click |
+| `computer_wait_for` | 等控件出现、消失、可用，或文本变成期望值 |
+| `computer_batch` | 一次请求执行多个动作（最多 50 步），共享一次桌面写锁 |
+
+危险动作默认拦下，带 `force=true` 才执行：关窗口、杀进程、写剪贴板、白名单之外的 shell 命令
+都会先返回 `confirm_required`。shell 免确认的只有不含管道、重定向、子表达式的只读命令
+（`Get-*` / `Test-*` / `Measure-*`、`dir`、`tasklist`、`ipconfig` 等）。
+
+**先激活再点，点完看结果。** 物理点击只会命中该坐标下最顶层的窗口：目标被别的窗口盖住时点击
+打不中，而且不会报错。所以 `computer_click` 现在每个结果都带 `hitWindow`（真正命中的窗口
+hwnd/进程/标题/尺寸），点被盖住的窗口前一眼就能看出来；`ensureForeground: true` 让宿主自动做
+完「抬窗 → 复核前台 → 再点」，抬不起来就返回 `not_foreground` 取消点击，宁可不动也不打空。
+`computer_window activate` 同样用 `GetForegroundWindow` 复核（返回 `foreground` 字段），不再
+单信 `SetForegroundWindow` 的返回值。按键和文字仍落到当前焦点窗口。坐标是虚拟桌面像素坐标，
+多显示器下可以为负。自绘界面（CEF/浏览器渲染窗口）读不到控件树，`computer_tree` 空树时带
+`diagnostics` 提示，这类窗口走「窗口截图 + 坐标」路线。
+
+**常驻宿主。** 第一版每个动作都起一个 `powershell.exe`，固定开销约 330ms。现在改成常驻进程：
+启动后按行读 JSON 命令，实测单次调用 p95 约 1ms，截图（320×200 区域）约 55ms。宿主卡死或崩溃时，
+服务端会杀掉并重启它，在途请求以 `host_restarted` 失败。设置 `ABB_DESKTOP_SPAWN=1` 可以退回逐次
+启动的旧路径，`ABB_DESKTOP_HOSTS` 控制宿主进程数（默认 2）。UIA 请求固定走 0 号宿主，因为元素
+ref 是宿主进程内的状态；其余读操作仍然分散到各进程。
+
+冷启动做了两层预热：服务起来就把宿主进程拉齐（`ABB_DESKTOP_WARM=0` 退回按需启动），宿主自己也
+只在对应能力第一次使用时才加载（UIA 的两个程序集、System.Drawing 这类重的只付一次），因此宿主
+冷启动约 0.4 秒，重启后不用再等 1 秒。宿主闲置较久后的第一发会多花 100–200ms（进程被换页后
+唤醒），随后恢复；连续多步合并进 `computer_batch` 是最快的路径。
+
+**并发。** 读操作（截图、窗口清单、读剪贴板、音量）并行执行；会改变桌面状态的操作
+（输入、点按、窗口动作、写剪贴板）全局串行。调用方用 `X-ABB-Agent` 头表明身份，同一身份可重入，
+不同身份冲突时返回 `409 desktop_busy` 并带上当前持有者；请求体里加 `waitMs` 可以排队等待。
+`computer_batch` 整批只取一次锁，批里的动作按顺序执行，默认某步失败后其余标记 `skipped`。
+
+**控件级操作（UIA）。** 坐标点击在窗口移动、弹窗遮挡或缩放变化后会打偏，复杂界面改走控件树：
+`computer_tree` 读窗口层级，`computer_find` 按条件定位并拿到 `ref`，`computer_act` 用 ref 执行动作。
+`invoke` / `setValue` 走控件自己的 UIA 模式，不移动鼠标、不抢焦点；`setValue` 只写内容，提交要另外
+`invoke`。ref 只在创建它的宿主进程里有效，所以 UIA 请求固定由 0 号宿主处理；控件重建后返回
+`element_stale`，重新 tree/find，或同时给窗口目标和选择器让它按原路径重定位。`wait_for` 用来等
+窗口异步刷新，不要固定 sleep。
+
+**无人值守。** 有人看着时用 `force` 确认危险动作；无人值守用策略文件
+`<configDir>/desktop-policy.json`（或 `ABB_DESKTOP_POLICY` 指定的路径）：
+
+```json
+{
+  "version": 1,
+  "default": { "readOnly": false },
+  "agents": {
+    "ci-runner": {
+      "allowForce": ["computerShell", "computerWindow"],
+      "shellAllow": ["^Get-", "^Test-"],
+      "deny": ["computerProcess"]
+    },
+    "watcher": { "readOnly": true }
+  }
+}
+```
+
+`deny` 命中一律 403，带 force 也绕不过；`readOnly` 的 agent 只能读；`allowForce` 里的动作
+不再要求 force，其中 `computerShell` 还要求命令命中 `shellAllow` 的某条正则。没有策略文件时
+行为与以前完全一致。文件按 mtime 自动重载，写坏了会保留上一次成功的规则，错误显示在 `/health`
+的 `desktopPolicy.error`。
+
+需要重试的写调用在请求体里带 `requestId`（1–64 位字母、数字与 `._:-`）：同一 agent 的同一个
+id 只执行一次，10 分钟内重试直接回放原响应，原请求还在执行时等它结束。只存在内存里，进程重启
+后失效，别把它当持久事务号。
+
+`scripts/supervise-server.ps1` 每 30 秒查一次 `/health`，连续 3 次失败就调用
+`restart-server.ps1`，日志写到 `logs/supervisor.log`。宿主自己的崩溃和命令超时已经会重启，
+supervisor 管的是服务进程本身。`/health` 还提供 `desktopMetrics`（调用数、失败数、p95）和
+`desktopIdempotency`（命中、等待、条数）。
+
+UAC 弹窗、锁屏、Windows Hello 按设计无法操作；DirectInput 独占的游戏不响应注入。
+
 ## 环境要求
 
 - Node.js 18+
@@ -213,6 +304,10 @@ npm i -g @hhhwdt/agent-browser-bridge  # 包发布之后，从 registry 装是�
 
 桥接服务还会在配置目录生成一个 token 文件（`%APPDATA%\agent-browser-bridge\token` 或
 `~/.config/agent-browser-bridge/token`），扩展凭此证明身份。其他扩展无法读取该文件。
+
+桌面动作不走扩展，也不申请任何浏览器权限：它是桥接进程以自己的身份在本机执行。信任边界因此从
+「浏览器」扩到「整台电脑」——同一个 token 既能驱动浏览器，也能驱动鼠标键盘和 PowerShell。不用
+桌面能力时不调用 `computer_*` 即可，它们不会被任何流程自动触发。
 
 如果你不想把 `debugger` 交出去，删掉 `upload`、`screenshot`、`grab` 三个动作即可，其他功能
 不依赖它。
@@ -384,7 +479,14 @@ POST /read /links /click /type /key /navigate /wait /frames
 POST /mark /unmark /activate /close /save /grab /media /download
 POST /eval /screenshot /session /upload
 POST /reload
+POST /computer/screen /computer/windows /computer/window
+POST /computer/click /computer/move /computer/drag /computer/scroll
+POST /computer/type /computer/key /computer/clipboard
+POST /computer/shell /computer/process /computer/notify /computer/media
+POST /computer/batch
 ```
+
+`/health` 里的 `desktop` 与 `desktopBroker` 给出宿主模式、各进程状态、写锁持有者与排队数。
 
 ## 把文件从页面里取出来
 
@@ -550,6 +652,10 @@ node test/test-offline.js        # 跑下面全部套件，最后给汇总
 | `test-frozen-tab.js` | 冻结标签页的报错指明下一步：用户不知道该先 activate 再重试 |
 | `test-batch.js` | 批量动作的执行顺序与停止条件：批量绕过风险护栏或步骤乱序 |
 | `test-lease.js` | Per-tab lease 的获取与释放：两个 agent 在同一标签页上交错执行 |
+| `test-computer-policy.js` | 桌面动作的门禁与键名解析：白名单被悄悄放宽，或把无效键码喂给 SendInput |
+| `test-desktop-broker.js` | 桌面写锁与 agent 身份：同身份重入、跨身份 FIFO 排队、超时与幂等释放 |
+| `test-desktop-host.js` | 常驻宿主：握手、热路径、结构化错误与崩溃重启（需 Windows） |
+| `test-desktop-runtime.js` | 策略文件、幂等表与指标：deny 能不能被 force 绕过、坏策略是否保留上一次规则 |
 
 `test-mcp.js` 在设了 `ABB_MCP_OFFLINE=1` 时会跳过需要扩展的那一节，CI 用的就是这个。同一套件在
 Linux（Node 18/20/22）和 Windows（Node 18/22）上各跑一遍，Windows 才是这工具的主场平台，
@@ -591,6 +697,20 @@ node test/test-editor.js         # 富文本编辑器链路（会进入编辑态
 
 > `test-editor.js` 会进入页面的编辑态，站点可能因此自动保存草稿。请指向临时页面，别指向正式内容。
 
+桌面动作有单独的实机套件，自己起隔离端口（18997 / 18998）的实例，不碰你正在用的 18777：
+
+```bash
+node test/test-computer.js       # 56 项，只在 Windows 上有意义
+node test/test-computer-uia.js   # 38 项，会自己开一个 WPF 测试窗口再关掉
+
+# 宿主稳定性压测：默认 60 秒；上线前建议跑够 24 小时
+$env:ABB_SOAK_SECONDS='86400'; node test/test-desktop-soak.js
+```
+
+它会真的截一张桌面小图、移动一次鼠标、写入剪贴板后回写原内容、弹一条通知，并检查缩放显示器上
+窗口坐标与截图像素是否同一空间。按键注入默认跳过：任何按键都会落进你当前焦点窗口，要单独验证时
+设 `ABB_COMPUTER_KEY_TEST=1`。
+
 ## 项目结构
 
 ```
@@ -600,6 +720,14 @@ src/                     Node 这一侧
   cli.js                 同样的能力，命令行形态，实现拆在 src/cli/
   mcp.js                 MCP 服务：agent 直接对接的就是它，实现拆在 src/mcp/
   setup.js               一条命令自检：缺哪一层、下一步做什么
+  computer/              桌面控制执行器（Windows）：门禁、常驻宿主与 PowerShell 函数库
+    index.js             门禁、参数夹取、shell 与进程执行、临时文件清理
+    host.js              常驻宿主进程与宿主池（NDJSON 协议、超时重启、健康状态）
+    host/                host.ps1 与 lib/*.ps1：截图、输入、窗口、剪贴板、通知、音量
+    broker.js            桌面写锁与 agent 身份（可重入、FIFO 排队、超时）
+    keys.js              键名与组合键解析（ctrl+shift+t 这类语法）
+    dispatch.js          动作参数校验与执行分发（路由与 batch 共用）
+    scripts/             旧式逐次执行脚本（ABB_DESKTOP_SPAWN=1 时退回）
 extension/               MV3 扩展（Chrome + Edge 通用）
   manifest.json          权限、入口、公钥
   popup.html/.js         状态、站点授权、可选权限、token 配置、清除标记
@@ -643,6 +771,10 @@ docs/                    免责声明、安全模型、隐私说明、快速开�
 - 共享 token 能防其他扩展，但同用户进程能从磁盘读取 token 文件。不要在共享或已受损的机器上运行桥接。
 - 批量动作不是事务性的：第 3 步失败时，前 2 步已提交。只有当后续步骤不依赖前面结果时才用 `continueOnError: true`。
 - Per-tab lease 5 分钟后过期。调用者崩溃后，lease 会阻塞其他人直到过期。
+- 桌面动作只支持 Windows。截图坐标是虚拟桌面像素，缩放比例不同的多显示器之间会有偏移。
+- 截最小化的窗口会先把它恢复（`SW_RESTORE`），否则 PrintWindow 只能得到 8x8 的空图。
+- 剪贴板只处理纯文本：图片、文件列表读不出来，写入也会把它们覆盖掉。
+- `computer_key` 走 SendInput，是真实按键：能触发浏览器和原生应用的快捷键，也会打断用户正在输入的内容。
 
 ## 参与开发
 

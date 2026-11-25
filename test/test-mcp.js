@@ -123,8 +123,9 @@ class McpClient {
       tools.every((t) => t.inputSchema.type === 'object' && t.inputSchema.properties),
       tools.filter((t) => t.inputSchema.type !== 'object').map((t) => t.name));
     check('工具名唯一', new Set(tools.map((t) => t.name)).size === tools.length);
-    check('工具名统一 browser_ 前缀', tools.every((t) => t.name.startsWith('browser_')),
-      tools.filter((t) => !t.name.startsWith('browser_')).map((t) => t.name));
+    check('工具名统一 browser_/computer_ 前缀',
+      tools.every((t) => t.name.startsWith('browser_') || t.name.startsWith('computer_')),
+      tools.filter((t) => !t.name.startsWith('browser_') && !t.name.startsWith('computer_')).map((t) => t.name));
     check('required 里列出的字段都在 properties 里',
       tools.every((t) => (t.inputSchema.required || []).every((k) => k in t.inputSchema.properties)),
       tools.filter((t) => (t.inputSchema.required || []).some((k) => !(k in t.inputSchema.properties))).map((t) => t.name));

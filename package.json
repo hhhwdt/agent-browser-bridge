@@ -29,6 +29,7 @@
     "test": "node test/test-offline.js",
     "test:browser": "node test/test-live.js",
     "test:basic": "node test/test-basic.js",
+    "test:computer": "node test/test-computer.js",
     "prepublishOnly": "node test/test-offline.js"
   },
   "keywords": [

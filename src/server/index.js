@@ -23,6 +23,10 @@
  *   POST /screenshot                      截图（走 debugger）
  *   POST /wait   /frames  /diag           同步与诊断
  *   POST /mark   /unmark  /activate /close /reload  标签页与扩展管理
+ *   POST /computer/*                       桌面控制（Windows 本地执行，不经扩展；
+ *                                          screen/windows/window/click/move/drag/
+ *                                          scroll/type/key/clipboard/shell/process/
+ *                                          notify/media，需要 force 的动作见 README）
  *   GET  /poll   /result                  扩展专用（长轮询与回传）
  *   GET  /ws（upgrade）                   扩展专用（WebSocket 任务推送）
  *
@@ -60,6 +64,7 @@ const poll = require('./routes/poll.js');
 const read = require('./routes/read.js');
 const files = require('./routes/files.js');
 const interact = require('./routes/interact.js');
+const computer = require('./routes/computer.js');
 
 /* ------------------------------------------------------------------ *
  * 路由表
@@ -93,7 +98,29 @@ for (const [method, paths, handler] of [
   ['POST', ['/diag'], read.routeDiag],
   ['POST', ['/reload'], read.routeReload],
   ['POST', ['/mark', '/unmark'], interact.routeMark],
-  ['POST', ['/batch'], interact.routeBatch]
+  ['POST', ['/batch'], interact.routeBatch],
+  /* computer 动作族：本地执行，不经扩展（见 src/computer/） */
+  ['POST', ['/computer/screen'], computer.routeScreen],
+  ['POST', ['/computer/windows'], computer.routeWindows],
+  ['POST', ['/computer/window'], computer.routeWindow],
+  ['POST', ['/computer/click'], computer.routeClick],
+  ['POST', ['/computer/move'], computer.routeMove],
+  ['POST', ['/computer/drag'], computer.routeDrag],
+  ['POST', ['/computer/scroll'], computer.routeScroll],
+  ['POST', ['/computer/type'], computer.routeType],
+  ['POST', ['/computer/key'], computer.routeKey],
+  ['POST', ['/computer/clipboard'], computer.routeClipboard],
+  ['POST', ['/computer/shell'], computer.routeShell],
+  ['POST', ['/computer/process'], computer.routeProcess],
+  ['POST', ['/computer/notify'], computer.routeNotify],
+  ['POST', ['/computer/media'], computer.routeMedia],
+  /* UIA：控件树、查找、操作、等待（Windows，本地执行） */
+  ['POST', ['/computer/tree'], computer.routeTree],
+  ['POST', ['/computer/find'], computer.routeFind],
+  ['POST', ['/computer/act'], computer.routeAct],
+  ['POST', ['/computer/wait'], computer.routeWaitFor],
+  /* 批量：一次请求多个桌面动作，共享一次写锁 */
+  ['POST', ['/computer/batch'], computer.routeBatch]
 ]) {
   for (const p of paths) { ROUTES.set(`${method} ${p}`, handler); }
 }
@@ -158,6 +185,8 @@ server.listen(PORT, HOST, () => {
   console.log(`Agent Browser Bridge 已启动: http://${HOST}:${PORT}`);
   console.log('等待浏览器扩展连接…');
   checkUpdate();
+  // Windows 上提前把常驻桌面宿主拉起来，免得第一个 computer_* 请求背 1 秒冷启动
+  require('../computer/exec.js').warm();
 });
 
 // WebSocket 只接 /ws；鉴权与注册在 ws.js（hello 消息带 token，头里放不了自定义值）

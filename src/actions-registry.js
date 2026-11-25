@@ -516,6 +516,346 @@ const ACTIONS = {
     mcpSchema: { type: 'object', properties: {}, additionalProperties: false },
     mcpDescription: '桥接与扩展的运行状态：在线浏览器、扩展版本与 id、最近错误。'
       + '任何工具报扩展未连接时先调它。'
+  },
+
+  /* ---------------------------------------------------------------- *
+   * computer 动作族（Windows 桌面控制，本地执行，不经扩展）。
+   * 路由在 src/server/routes/computer.js，执行在 src/computer/。
+   * 门禁：shell 白名单外 / window close / process kill / clipboard write
+   * 需要 force=true，其余放行（见 computer/index.js 的 gateDeny）。
+   * 无 maxTimeout 时标称超时必须 ≤ 120000（见 test-registry [8]）。
+   * ---------------------------------------------------------------- */
+  computerScreen: {
+    path: '/computer/screen',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_screen',
+    mcpParams: {
+      windowTitle: { type: 'string', description: '只截标题包含该子串的窗口（PrintWindow，后台窗口也能截）。' },
+      hwnd: { type: 'number', description: '按句柄截窗口，比标题稳定；来自 computer_windows 的 hwnd。' },
+      region: {
+        type: 'object',
+        description: '只截虚拟桌面上的一个矩形区域。',
+        properties: {
+          x: { type: 'number', description: '左上角 x' },
+          y: { type: 'number', description: '左上角 y' },
+          w: { type: 'number', description: '宽' },
+          h: { type: 'number', description: '高' }
+        },
+        additionalProperties: false
+      }
+    },
+    mcpDescription: '截取整个桌面画面并直接返回图片（多显示器覆盖整个虚拟桌面）。'
+      + '给窗口Title时只截该窗口（后台窗口也能截）。动手点击前先用它看清楚屏幕。'
+  },
+
+  computerWindows: {
+    path: '/computer/windows',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_windows',
+    mcpParams: {},
+    mcpDescription: '列出所有可见顶层窗口：标题、进程名、pid、位置尺寸、最小化/最大化状态。'
+      + '先列清单再决定操作哪个窗口；返回里的 index 可直接给 computer_window / 点击定位。'
+  },
+
+  computerWindow: {
+    path: '/computer/window',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_window',
+    mcpParams: {
+      action: { type: 'string', enum: ['activate', 'minimize', 'maximize', 'close'], description: 'activate 抬到前台，close 关闭（需 force）。' },
+      title: { type: 'string', description: '按标题子串匹配窗口。' },
+      pid: { type: 'number', description: '按进程 id 匹配窗口。' },
+      force: { type: 'boolean', description: 'close 需要 true；只有用户确认后才能传。' }
+    },
+    mcpRequired: ['action'],
+    mcpDescription: '对一个已存在的窗口做动作：activate 抬到前台、minimize/maximize、close 关闭。'
+      + '键入与按键之前先 activate 目标窗口，否则键盘输入会落到当前焦点程序。'
+      + 'close 会丢失窗口里未保存的工作，只有在用户确认后才能传 force=true。'
+  },
+
+  computerClick: {
+    path: '/computer/click',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_click',
+    mcpParams: {
+      x: { type: 'number', description: '屏幕坐标 x（虚拟桌面像素坐标，多显示器可为负）。' },
+      y: { type: 'number', description: '屏幕坐标 y。' },
+      button: { type: 'string', enum: ['left', 'right', 'middle'], description: '默认 left。' },
+      double: { type: 'boolean', description: '双击。' }
+    },
+    mcpRequired: ['x', 'y'],
+    mcpDescription: '在屏幕坐标上点击鼠标。先 computer_screen 看清目标再给坐标，'
+      + '这一下点的是用户真实桌面：点错就点到别的程序上了，无法撤销。'
+  },
+
+  computerMove: {
+    path: '/computer/move',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_move',
+    mcpParams: {
+      x: { type: 'number', description: '屏幕坐标 x。' },
+      y: { type: 'number', description: '屏幕坐标 y。' }
+    },
+    mcpRequired: ['x', 'y'],
+    mcpDescription: '移动鼠标指针到指定坐标（不点击）。常用于观察悬停反应或为拖拽做准备。'
+  },
+
+  computerDrag: {
+    path: '/computer/drag',
+    bespoke: true,
+    timeout: 60000,
+    mcp: 'computer_drag',
+    mcpParams: {
+      x1: { type: 'number', description: '起点 x。' },
+      y1: { type: 'number', description: '起点 y。' },
+      x2: { type: 'number', description: '终点 x。' },
+      y2: { type: 'number', description: '终点 y。' },
+      steps: { type: 'number', description: '分几步移动（默认 24），越大越平滑。' },
+      stepMs: { type: 'number', description: '每步间隔毫秒（默认 12）。' }
+    },
+    mcpRequired: ['x1', 'y1', 'x2', 'y2'],
+    mcpDescription: '按住鼠标左键从起点拖到终点（分步移动模拟人手）。'
+      + '用于拖动窗口、滑块和文件；目标应用完全不受控时会拖脏桌面界面。'
+  },
+
+  computerScroll: {
+    path: '/computer/scroll',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_scroll',
+    mcpParams: {
+      amount: { type: 'number', description: '滚轮格数，负值向下（默认 -3）。' },
+      x: { type: 'number', description: '先移动到此坐标再滚（省略则在当前位置滚）。' },
+      y: { type: 'number', description: '同上。' }
+    },
+    mcpDescription: '滚动鼠标滚轮。滚的是当前鼠标位置下的窗口。'
+  },
+
+  computerType: {
+    path: '/computer/type',
+    bespoke: true,
+    timeout: 60000,
+    mcp: 'computer_type',
+    mcpParams: {
+      text: { type: 'string', description: '要键入的文本（Unicode 逐字注入，支持中文与换行）。' }
+    },
+    mcpRequired: ['text'],
+    mcpDescription: '向当前焦点窗口键入文本（Unicode 注入，不用剪贴板）。'
+      + '先确认焦点在正确的窗口：键盘输入落错地方就是给别的程序按键。'
+      + '文本里的换行符会作为 Enter 发出；只输入内容，不负责提交。'
+  },
+
+  computerKey: {
+    path: '/computer/key',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_key',
+    mcpParams: {
+      key: { type: 'string', description: '键名或组合键：Enter / Tab / Escape / 方向键 / F1-24，'
+        + '或 "ctrl+c"、"win+d"、"ctrl+shift+esc" 这类加号组合。' }
+    },
+    mcpRequired: ['key'],
+    mcpDescription: '向当前焦点窗口派发按键或组合键（Ctrl/Shift/Alt/Win 修饰）。'
+      + '闭源应用的原生快捷键也能触发。按 Enter/删除类键之前先想清焦点在哪。'
+  },
+
+  computerClipboard: {
+    path: '/computer/clipboard',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_clipboard',
+    mcpParams: {
+      action: { type: 'string', enum: ['read', 'write'], description: '默认 read。' },
+      text: { type: 'string', description: '写入的文本（action=write 时必填，需 force）。' },
+      force: { type: 'boolean', description: 'write 需要 true；只有用户确认后才能传。' }
+    },
+    mcpDescription: '读取或写入当前剪贴板（纯文本，支持中文）。'
+      + 'write 会覆盖用户正复制着的内容，需要 force=true——只有用户确认后才传。'
+  },
+
+  computerShell: {
+    path: '/computer/shell',
+    bespoke: true,
+    timeout: 300000,
+    maxTimeout: 300000,
+    mcp: 'computer_shell',
+    mcpParams: {
+      command: { type: 'string', description: '一条 PowerShell 命令。' },
+      timeoutMs: { type: 'number', description: '超时毫秒（默认 120000，上限 300000），超时进程被终止。' },
+      force: { type: 'boolean', description: '白名单外的命令需要 true；只有用户确认后才能传。' }
+    },
+    mcpRequired: ['command'],
+    mcpDescription: '执行一条 PowerShell 命令并取回合并输出（stdout+stderr、退出码）。'
+      + '命令在后台静默运行，不弹窗口。只读动词（Get-*/Test-*/Measure-*/dir/tasklist/ipconfig 等）'
+      + '免确认；列表外或含管道/重定向/子表达式的命令需要 force=true。超时的命令会被终止。'
+  },
+
+  computerProcess: {
+    path: '/computer/process',
+    bespoke: true,
+    timeout: 45000,
+    maxTimeout: 45000,
+    mcp: 'computer_process',
+    mcpParams: {
+      mode: { type: 'string', enum: ['list', 'kill'], description: '默认 list。' },
+      pid: { type: 'number', description: '要杀的进程 id（mode=kill 时填，需 force）。' },
+      force: { type: 'boolean', description: 'kill 需要 true；只有用户确认后才能传。' }
+    },
+    mcpDescription: '列出本机进程（pid、名称、内存）或终止一个进程。'
+      + '杀进程可能丢数据，kill 需要 force=true——只有用户确认后才传。'
+  },
+
+  computerNotify: {
+    path: '/computer/notify',
+    bespoke: true,
+    timeout: 20000,
+    mcp: 'computer_notify',
+    mcpParams: {
+      title: { type: 'string', description: '通知标题（省略时用 "Agent Browser Bridge"）。' },
+      message: { type: 'string', description: '通知正文。' }
+    },
+    mcpDescription: '弹一条 Windows 通知中心 toast（走 PowerShell 内置 AppId，不需要注册）。'
+      + '长任务收尾时提醒用户用。'
+  },
+
+  computerMedia: {
+    path: '/computer/media',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_media',
+    mcpParams: {
+      op: { type: 'string', enum: ['get', 'volume', 'play', 'pause', 'toggle', 'next', 'prev', 'stop', 'volup', 'voldown', 'mute', 'unmute'], description: 'get 读状态；volume 设置音量（给 volume 0-100）；其余为媒体键。' },
+      volume: { type: 'number', description: '目标音量 0-100（op=volume 时）。' }
+    },
+    mcpDescription: '读取/设置系统主音量、静音，及播放/暂停/下一首等媒体键。'
+      + '返回里带 volumePercent 与 muted 状态。'
+  },
+
+  computerTree: {
+    path: '/computer/tree',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_tree',
+    mcpParams: {
+      windowTitle: { type: 'string', description: '窗口标题子串；与 hwnd/pid 三选一。' },
+      hwnd: { type: 'number', description: '窗口句柄，优先于标题。' },
+      pid: { type: 'number', description: '按进程 id 找窗口。' },
+      depth: { type: 'number', description: '树深度，默认 6，最大 12。' },
+      maxNodes: { type: 'number', description: '最多返回节点数，默认 400，最大 2000。' },
+      includeOffscreen: { type: 'boolean', description: '是否包含屏幕外元素，默认 true。' },
+      patterns: { type: 'boolean', description: '附带每个元素支持的 UIA 模式，会慢一些。' }
+    },
+    mcpDescription: '读取窗口的 UI Automation 控件树（control view）。每个节点带 ref、角色、名称、'
+      + 'automationId、类名、坐标和启用状态。ref 交给 computer_act 用；控件重建或宿主重启后'
+      + '会失效（element_stale），重新 tree/find 即可。'
+  },
+
+  computerFind: {
+    path: '/computer/find',
+    bespoke: true,
+    timeout: 35000,
+    mcp: 'computer_find',
+    mcpParams: {
+      windowTitle: { type: 'string', description: '窗口标题子串；与 hwnd/pid 三选一。' },
+      hwnd: { type: 'number', description: '窗口句柄。' },
+      pid: { type: 'number', description: '按进程 id 找窗口。' },
+      name: { type: 'string', description: '控件名称，默认子串匹配（不区分大小写）。' },
+      nameExact: { type: 'boolean', description: 'name 改成精确匹配。' },
+      automationId: { type: 'string', description: 'AutomationId，精确匹配。' },
+      controlType: { type: 'string', description: '控件类型，如 Button / Edit / MenuItem / Window。' },
+      className: { type: 'string', description: '类名，子串匹配。' },
+      maxResults: { type: 'number', description: '最多返回几个匹配，默认 20，最大 200。' },
+      depth: { type: 'number', description: '搜索深度，默认 12。' },
+      includeOffscreen: { type: 'boolean', description: '是否包含屏幕外元素，默认 true。' },
+      patterns: { type: 'boolean', description: '附带匹配元素支持的 UIA 模式。' }
+    },
+    mcpDescription: '按 name / automationId / controlType / className 在窗口里查找控件，返回 ref 与坐标。'
+      + '至少给一个过滤条件。比遍历整棵树快，适合“找到某个按钮再点”。'
+  },
+
+  computerAct: {
+    path: '/computer/act',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_act',
+    mcpParams: {
+      ref: { type: 'string', description: 'computer_tree/find 返回的 ref，如 e12。' },
+      action: { type: 'string', enum: ['invoke', 'toggle', 'setValue', 'getValue', 'select', 'expand', 'collapse', 'focus', 'scrollIntoView', 'click'], description: '要执行的动作。' },
+      text: { type: 'string', description: 'action=setValue 时要写入的文本。' },
+      windowTitle: { type: 'string', description: '窗口标题子串（用选择器定位控件时需要）。' },
+      hwnd: { type: 'number', description: '窗口句柄（用选择器定位控件时需要）。' },
+      name: { type: 'string', description: '控件名称（没有 ref 时用）。' },
+      automationId: { type: 'string', description: 'AutomationId（没有 ref 时用）。' },
+      controlType: { type: 'string', description: '控件类型（没有 ref 时用）。' },
+      className: { type: 'string', description: '类名（没有 ref 时用）。' },
+      requestId: { type: 'string', description: '幂等 id（1-64 位字母数字/_:-.）：重试同一逻辑请求时保持不变，服务端只执行一次。' }
+    },
+    mcpRequired: ['action'],
+    mcpDescription: '对控件执行 UIA 动作：invoke / toggle / setValue / getValue / select / expand / '
+      + 'collapse / focus / scrollIntoView / click。优先用 tree/find 的 ref；ref 失效且同时给了窗口和'
+      + '选择器时会自动重新定位。setValue 只写内容不提交。getValue 返回控件文本，注意脱敏。'
+  },
+
+  computerWaitFor: {
+    path: '/computer/wait',
+    bespoke: true,
+    timeout: 65000,
+    maxTimeout: 70000,
+    mcp: 'computer_wait_for',
+    mcpParams: {
+      ref: { type: 'string', description: '要等待的控件 ref。' },
+      condition: { type: 'string', enum: ['exists', 'gone', 'enabled', 'value'], description: '默认 exists；gone 等消失，enabled 等可用，value 等文本相等。' },
+      value: { type: 'string', description: 'condition=value 时的期望文本。' },
+      windowTitle: { type: 'string', description: '窗口标题子串。' },
+      hwnd: { type: 'number', description: '窗口句柄。' },
+      name: { type: 'string', description: '控件名称。' },
+      automationId: { type: 'string', description: 'AutomationId。' },
+      controlType: { type: 'string', description: '控件类型。' },
+      className: { type: 'string', description: '类名。' },
+      timeoutMs: { type: 'number', description: '最多等多久，默认 10000，最大 60000。' },
+      intervalMs: { type: 'number', description: '轮询间隔，默认 200。' }
+    },
+    mcpDescription: '等控件出现/消失/可用/文本变成期望值。窗口异步刷新后先用它，不要固定 sleep。'
+      + '超时返回 wait_timeout。'
+  },
+
+  computerBatch: {
+    path: '/computer/batch',
+    bespoke: true,
+    timeout: 300000,
+    maxTimeout: 300000,
+    mcp: 'computer_batch',
+    mcpSchema: {
+      type: 'object',
+      properties: {
+        ops: {
+          type: 'array',
+          description: '按顺序执行的动作列表，每项 { action, params }。',
+          items: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', description: '动作键，如 computerClick、computerKey。' },
+              params: { type: 'object', description: '该动作的参数，与单独调用时一致。' }
+            },
+            required: ['action'],
+            additionalProperties: false
+          }
+        },
+        waitMs: { type: 'number', description: '桌面被占用时最多排队毫秒（默认 0，立即返回 desktop_busy）。' },
+        stopOnError: { type: 'boolean', description: '默认 true：某步失败后其余标记 skipped。' },
+        requestId: { type: 'string', description: '幂等 id（1-64 位字母数字/_:-.）：整批重试时保持不变，服务端只执行一次。' }
+      },
+      required: ['ops'],
+      additionalProperties: false
+    },
+    mcpDescription: '一次请求执行多个桌面动作，共享一次桌面写锁，省掉每步的 HTTP 往返。'
+      + 'ops 每项 { action, params }，action 用动作键（如 computerClick）。'
+      + '默认某步失败后其余标记 skipped；最多 50 步。'
   }
 };
 
@@ -525,7 +865,14 @@ const MCP_ORDER = [
   'browser_batch', 'browser_click', 'browser_type', 'browser_press_key', 'browser_wait_for',
   'browser_screenshot', 'browser_eval', 'browser_frames', 'browser_save_file',
   'browser_upload_file', 'browser_session', 'browser_close_tab', 'browser_clear_marks',
-  'browser_status'
+  'browser_status',
+  /* computer 桌面控制（Windows） */
+  'computer_screen', 'computer_windows', 'computer_window',
+  'computer_click', 'computer_move', 'computer_drag', 'computer_scroll',
+  'computer_type', 'computer_key', 'computer_clipboard',
+  'computer_shell', 'computer_process', 'computer_notify', 'computer_media',
+  'computer_tree', 'computer_find', 'computer_act', 'computer_wait_for',
+  'computer_batch'
 ];
 
 /**

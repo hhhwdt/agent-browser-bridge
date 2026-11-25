@@ -13,6 +13,9 @@ const {
   dispatch, connectedBrowsers, orderBrowsers, extensionConnected, pending, queuedCount
 } = require('../queue.js');
 const { makeRoute } = require('./generic.js');
+const desktop = require('../../computer/exec.js');
+const { broker: desktopBroker, idempotency, metrics } = require('./computer.js');
+const { policy: desktopPolicy } = require('../../computer/policy.js');
 
 const routeHealth = async function routeHealth(req, res) {
   sendJson(res, 200, {
@@ -25,7 +28,12 @@ const routeHealth = async function routeHealth(req, res) {
     queuedTasks: queuedCount(),
     capabilities: CAPABILITIES,
     allowedExtensionIds: Array.from(allowedExtensionIds),
-    defaultBrowserOrder: orderBrowsers(connectedBrowsers())
+    defaultBrowserOrder: orderBrowsers(connectedBrowsers()),
+    desktop: desktop.status(),
+    desktopBroker: desktopBroker.status(),
+    desktopPolicy: desktopPolicy.status(),
+    desktopMetrics: metrics.snapshot(),
+    desktopIdempotency: idempotency.status()
   }, req);
 };
 

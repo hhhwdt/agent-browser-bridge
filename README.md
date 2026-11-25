@@ -124,6 +124,113 @@ the one you are looking at — which is the whole point.
 
 Chrome and Edge run side by side, fully isolated, with automatic routing.
 
+### Desktop control (Windows)
+
+The bridge can also drive the local desktop directly, without the extension. Eighteen actions plus
+one batch entry point:
+
+| Capability | What it does |
+|---|---|
+| `computer_screen` | Capture every monitor, one window (PrintWindow, hardware-accelerated content included), or a rectangle; several title matches answer `ambiguous_window` (pass `hwnd` instead), a flat single-colour window capture returns `blank: true` |
+| `computer_windows` | List visible top-level windows: title, process, pid, bounds, minimised/maximised |
+| `computer_window` | activate / minimize / maximize / close a window; activate re-checks via `GetForegroundWindow` and returns `foreground` |
+| `computer_click` `computer_move` `computer_drag` `computer_scroll` | Mouse at virtual-desktop coordinates; click answers `hitWindow` (the top-level window actually hit) and takes `ensureForeground: true` to activate, verify and only then click |
+| `computer_type` `computer_key` | Type Unicode text; dispatch keys and combos (Ctrl/Shift/Alt/Win) |
+| `computer_clipboard` | Read or write clipboard text |
+| `computer_shell` | Run one PowerShell command; returns merged output and exit code |
+| `computer_process` | List processes, or terminate a pid |
+| `computer_notify` | Show a Windows toast |
+| `computer_media` | Read/set master volume and mute; play/pause/next media keys |
+| `computer_tree` `computer_find` | Read a window's UIA control tree, or find controls by name / automationId / role / class; returns refs; an empty tree carries `diagnostics` |
+| `computer_act` | Run invoke / toggle / setValue / getValue / select / expand / collapse / focus / scrollIntoView / click on a control |
+| `computer_wait_for` | Wait for a control to appear, disappear, become enabled, or reach an expected value |
+| `computer_batch` | Run up to 50 actions in one request under a single desktop lock |
+
+Destructive actions are refused unless the call carries `force=true`: closing a window, killing a
+process, writing the clipboard, and any shell command outside the read-only allowlist return
+`confirm_required` first. The allowlist is single-token read-only commands with no pipe, redirection
+or subexpression (`Get-*` / `Test-*` / `Measure-*`, `dir`, `tasklist`, `ipconfig`, ...).
+
+**Activate first, click second, inspect the answer.** A physical click only reaches the topmost
+window at that point: clicking a covered window silently does nothing. Every `computer_click`
+therefore answers with `hitWindow` — the window the point really landed on (hwnd, process, title,
+bounds). Pass `ensureForeground: true` and the host activates the window under the point, verifies
+it is foreground, and cancels with `not_foreground` instead of firing blind. `computer_window
+activate` is verified through `GetForegroundWindow` too (`foreground` field) instead of trusting
+`SetForegroundWindow`'s return value. Typed text and key presses land in the focused window.
+Coordinates are virtual-desktop pixels and can be negative on multi-monitor setups. Self-drawn
+interfaces (CEF, browser-rendered windows) expose no control tree — `computer_tree` answers with
+`diagnostics` in that case; drive such windows with screenshots plus coordinates.
+
+**Persistent host.** The first version spawned a `powershell.exe` per action, a fixed ~330 ms cost.
+Actions now go to a long-lived host that reads JSON lines on a stdio pipe: p95 ~1 ms per call and
+~55 ms for a 320x200 capture, measured on this machine. If the host hangs or crashes, the server
+kills and restarts it; in-flight calls fail with `host_restarted`. Set `ABB_DESKTOP_SPAWN=1` for the
+old per-call path, `ABB_DESKTOP_HOSTS` for the number of host processes (default 2). UIA calls
+always go to host 0, because element refs are process-local state; other reads still spread across
+the pool.
+
+Two warm-up layers keep the restart cost off your first task: the pool is started as soon as the
+server listens (`ABB_DESKTOP_WARM=0` for lazy), and each capability library loads only on its first
+use, so a host cold start is ~0.4 s instead of ~1 s. After a long idle the first call may cost an
+extra 100-200 ms while paged-out pages come back; after that calls are single-digit milliseconds.
+Multi-step flows belong in `computer_batch`, which pays one HTTP round trip for the whole batch.
+
+**Concurrency.** Reads (capture, window list, clipboard read, volume) run in parallel. Anything that
+changes desktop state (input, clicks, window actions, clipboard writes) is serialised globally. Callers
+identify themselves with the `X-ABB-Agent` header; the same identity is re-entrant, a different one
+gets `409 desktop_busy` with the current holder, and `waitMs` queues instead of failing. A
+`computer_batch` holds the lock once for the whole list; steps run in order and the rest are marked
+`skipped` after the first failure by default.
+
+**Control-level actions (UIA).** Coordinate clicks drift when a window moves, a dialog covers it, or
+the scale changes. Complex interfaces use the control tree instead: `computer_tree` reads a window's
+hierarchy, `computer_find` locates a control by condition and returns a `ref`, and `computer_act`
+runs an action on that ref. `invoke` and `setValue` go through the control's own UIA patterns without
+moving the mouse or stealing focus; `setValue` only writes, so submitting needs a separate `invoke`.
+Refs are valid only inside the host process that created them, which is why UIA calls are pinned to
+host 0. When a control is rebuilt the ref answers `element_stale`: run tree/find again, or pass the
+window target and a selector so it can re-resolve by path. `wait_for` covers asynchronous refreshes;
+do not sleep for a fixed time.
+
+**Unattended operation.** When someone is watching, `force` confirms a destructive action. For
+unattended runs, use `<configDir>/desktop-policy.json` (or the path in `ABB_DESKTOP_POLICY`):
+
+```json
+{
+  "version": 1,
+  "default": { "readOnly": false },
+  "agents": {
+    "ci-runner": {
+      "allowForce": ["computerShell", "computerWindow"],
+      "shellAllow": ["^Get-", "^Test-"],
+      "deny": ["computerProcess"]
+    },
+    "watcher": { "readOnly": true }
+  }
+}
+```
+
+Anything in `deny` answers 403 and `force` does not override it; a `readOnly` agent may only read;
+actions in `allowForce` no longer need `force`, and `computerShell` additionally requires the command
+to match one of the `shellAllow` regular expressions. Without a policy file nothing changes. The file
+is reloaded on mtime change; a broken edit keeps the last good rules and reports the error in
+`/health` as `desktopPolicy.error`.
+
+Write calls that may be retried can carry `requestId` (1-64 letters, digits and `._:-`): the same id
+from the same agent runs once, retries within 10 minutes replay the original response, and a retry
+arriving while the original is still running waits for it. It lives in memory only and does not
+survive a restart — not a durable transaction id.
+
+`scripts/supervise-server.ps1` checks `/health` every 30 seconds and, after three consecutive
+failures, calls `restart-server.ps1`; it logs to `logs/supervisor.log`. Host crashes and command
+timeouts are already restarted by the server itself; the supervisor watches the server process.
+`/health` also exposes `desktopMetrics` (calls, failures, p95) and `desktopIdempotency` (hits, waits,
+entries).
+
+UAC prompts, the lock screen and Windows Hello cannot be driven by design; DirectInput-exclusive games
+ignore injected input.
+
 ## Requirements
 
 - Node.js 18+
@@ -208,6 +315,11 @@ decided them for us:
 
 If you would rather not hand over `debugger`, delete `upload`, `screenshot` and `grab`; nothing
 else depends on it.
+
+Desktop actions never touch the extension and request no browser permission: the bridge process
+performs them under your own account. The trust boundary therefore moves from "the browser" to "the
+machine" — the same token that drives tabs also drives the mouse, keyboard and PowerShell. If you do
+not want that, do not call the `computer_*` tools; nothing invokes them on its own.
 
 ## Use it from an agent (MCP)
 
@@ -381,7 +493,15 @@ POST /read /links /click /type /key /navigate /wait /frames
 POST /mark /unmark /activate /close /save /grab /media /download
 POST /eval /screenshot /session /upload
 POST /reload
+POST /computer/screen /computer/windows /computer/window
+POST /computer/click /computer/move /computer/drag /computer/scroll
+POST /computer/type /computer/key /computer/clipboard
+POST /computer/shell /computer/process /computer/notify /computer/media
+POST /computer/batch
 ```
+
+`/health` also reports `desktop` and `desktopBroker`: host mode, per-process state, lock holder and
+queue depth.
 
 ## Getting files out of a page
 
@@ -570,6 +690,10 @@ node test/test-offline.js        # all of the suites below, then a summary
 | `test-frozen-tab.js` | the hint names the next step — the failure mode where a user doesn't know to activate before retrying |
 | `test-batch.js` | batch execution order and stop-on-failure — the failure mode where a batch bypasses the risk rails or runs steps out of order |
 | `test-lease.js` | lease acquisition and release — the failure mode where two agents interleave on the same tab with no ordering guarantee |
+| `test-computer-policy.js` | desktop gating and key parsing — the failure mode where the allowlist quietly widens, or invalid key codes reach SendInput |
+| `test-desktop-broker.js` | desktop write lock and agent identity: re-entrancy, FIFO queueing, timeout and idempotent release |
+| `test-desktop-host.js` | the persistent host: handshake, hot path, structured errors and crash restart (Windows) |
+| `test-desktop-runtime.js` | policy file, idempotency table and metrics: whether `force` can bypass a deny, and whether a broken policy keeps the last good rules |
 
 `test-mcp.js` skips its live section when `ABB_MCP_OFFLINE=1` is set, which is what CI uses. The same
 suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22). Windows is this tool's main
@@ -614,6 +738,22 @@ They create and close their own tabs and leave your active tab untouched.
 > `test-editor.js` enters the page's edit mode, which makes the site auto-save a draft. Point it at
 > a scratch page, not production content.
 
+Desktop actions have their own live suites. They start isolated instances on ports 18997 and 18998
+and leave your running bridge alone:
+
+```bash
+node test/test-computer.js       # 56 assertions; Windows only
+node test/test-computer-uia.js   # 38 assertions; opens and closes its own WPF window
+
+# Host soak: 60 seconds by default; run 24 hours before an unattended deployment
+$env:ABB_SOAK_SECONDS='86400'; node test/test-desktop-soak.js
+```
+
+It really captures a 320x200 patch of the desktop, moves the mouse once, writes the clipboard and
+puts the original text back, and shows a toast. It also checks that window bounds and screenshots
+share one pixel space on scaled displays. Key injection is skipped by default — any key press
+lands in whatever window is focused — set `ABB_COMPUTER_KEY_TEST=1` to include it.
+
 ## Project layout
 
 ```
@@ -623,6 +763,14 @@ src/                     the Node side
   cli.js                 the same capabilities from the command line — implementation in src/cli/
   mcp.js                 the MCP server your agent talks to — implementation in src/mcp/
   setup.js               one-command self-check: which layer is missing, what to do about it
+  computer/              desktop control (Windows): gating, persistent host, PowerShell library
+    index.js             the confirm_required gate, shell/process execution, temp cleanup
+    host.js              persistent host processes and pool (NDJSON protocol, timeout restart, health)
+    host/                host.ps1 plus lib/*.ps1: screen, input, windows, clipboard, notify, audio
+    broker.js            desktop write lock and agent identity (re-entrant, FIFO queue, timeout)
+    keys.js              key and combo parsing (the ctrl+shift+t syntax)
+    dispatch.js          parameter validation and execution shared by routes and batch
+    scripts/             legacy per-call scripts (used when ABB_DESKTOP_SPAWN=1)
 extension/               the browser extension (MV3)
   manifest.json          permissions, entry point, public key
   popup.html/.js         status, site grants, opt-in permissions, clear marks
@@ -674,6 +822,13 @@ Two things to know before you touch the code:
 - Batch actions are not transactional: if step 3 fails, steps 1-2 are already committed. Use
   `continueOnError: true` only when later steps do not depend on earlier ones.
 - Per-tab leases expire after 5 minutes. A crashed caller's lease will block others until it expires.
+- Desktop actions are Windows only. Screenshot coordinates are virtual-desktop pixels; monitors at
+  different scale factors will be offset from what a single-monitor mental model expects.
+- Capturing a minimised window restores it first (`SW_RESTORE`); otherwise PrintWindow returns an
+  8x8 blank frame.
+- The clipboard is text only: images and file lists cannot be read, and writing replaces them.
+- `computer_key` uses SendInput and is a real key press: it triggers browser and native shortcut
+  handlers, and it interrupts whatever the user is typing.
 
 ## Contributing
 
