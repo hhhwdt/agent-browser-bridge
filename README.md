@@ -597,9 +597,17 @@ Two details that cost real debugging time, in case you touch this code:
   half-mark. Cleanup therefore discovers marked tabs by **either** the title prefix or the tab's
   `favIconUrl`, not the title alone.
 
+The marks are applied **once per tab, not once per action**. The badge text and title follow the
+latest action, but the favicon dot and the in-page overlay are injected once and then refreshed at
+most every five seconds. Re-injecting them per action cost two extra script injections on every
+single call — roughly a 3.7x difference in steady-state throughput — with nothing extra to show for
+it. Nothing is ever unmarked: the first action on a tab always applies the full set.
+
 Beyond the visible marks, the bridge writes every dispatched action to an audit log (`audit.jsonl`),
 recording timestamp, action, target, outcome, and duration. The log records action metadata only —
-never page content. Read it with `node src/cli.js log`.
+never page content. Read it with `node src/cli.js log`. Writes are batched: lines produced in the
+same event-loop turn go out in one asynchronous append, and a shutdown flushes what is still
+pending.
 
 ## Pages that fight back
 
@@ -676,6 +684,7 @@ node test/test-offline.js        # all of the suites below, then a summary
 | `test-allowlist.js` | which origins may drive the bridge, and that the manifest key derives the allowlisted ID |
 | `test-sw-load.js` | the service-worker module graph loads at all, boots exactly once, and still exports what it used to — in a browser a load-time failure only shows up as "the extension stopped responding" |
 | `test-result-semantics.js` | an action that could not do its job reports `ok: false` rather than success — the failure mode that leaves the caller with no reason to look again |
+| `test-mark-throttle.js` | the page-side marks are injected once per tab and refreshed on an interval, not re-injected on every action |
 | `test-i18n-keys.js` | every i18n key used by the popup and the manifest exists in both locale files — a missing key renders as an empty string, which is silent |
 | `test-wait.js` | each wait condition (selector, text, url, count, idle) returns ok when satisfied and `wait_timeout` when not — the failure mode that means "the next step ran before the page was ready" |
 | `test-audit.js` | the audit log records actions but never page content — a log that leaks what someone read is worse than no log |
@@ -700,6 +709,12 @@ suite runs on Linux (Node 18/20/22) and on Windows (Node 18/22). Windows is this
 platform, so it is not left to a single Ubuntu job to prove.
 
 `test/` and `tools/` exist in a clone only; they are not part of the published package.
+
+`test/bench-throughput.js` is a benchmark, not an assertion suite: it needs a running bridge and a
+connected browser, and it is not part of `test-offline.js` or CI. Run it before and after a
+performance change — `node test/bench-throughput.js` opens background tabs on the bridge's own
+address and closes them again. Reference numbers from the machine this was written on are in the
+file's header.
 
 **Live**: a real browser, still no configuration. It uses the bridge's own address as the page under
 test, which the manifest already permits, so there is no site to grant:

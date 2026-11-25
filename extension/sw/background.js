@@ -11,7 +11,7 @@
 'use strict';
 
 import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
-import { MARKS_KEY, collectMarkedTabs, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
+import { MARKS_KEY, collectMarkedTabs, forgetTab, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
 import { startWs, retryWs, wsConnected, wsState, sendResult } from './ws.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
 
@@ -367,6 +367,7 @@ async function pollLoop() {
 
 // 标签页关闭后清理它的标记记录，避免列表无限增长
 chrome.tabs.onRemoved.addListener((tabId) => {
+  forgetTab(tabId);
   if (markedTabs.delete(tabId)) {
     saveMarks();
   }

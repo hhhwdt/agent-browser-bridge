@@ -60,6 +60,7 @@ const { hasValidToken } = require('./token.js');
 const { sendJson, isAllowedOrigin, isExtensionOrigin, reportRejectedOrigin } = require('./http.js');
 const { checkUpdate } = require('./update.js');
 const { attach: attachWs } = require('./ws.js');
+const { flushAudit } = require('./audit.js');
 const poll = require('./routes/poll.js');
 const read = require('./routes/read.js');
 const files = require('./routes/files.js');
@@ -206,7 +207,15 @@ server.on('error', (e) => {
   process.exit(1);
 });
 
-process.on('SIGINT', () => {
+/**
+ * 关闭：先把审计日志里还没落盘的行写完，再退出。
+ * SIGTERM 一起接：7x24 部署里 kill 比 Ctrl+C 更常见，审计日志不能因此丢尾巴。
+ */
+async function shutdown() {
   console.log('\n正在关闭…');
+  await flushAudit();
   server.close(() => process.exit(0));
-});
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

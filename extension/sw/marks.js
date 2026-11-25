@@ -46,6 +46,19 @@ const MARKS_KEY = 'abb-marked-tabs';
 
 const markedTabs = new Set();
 
+/**
+ * 页面内浮层的最小刷新间隔。
+ *
+ * 徽标和标题由扩展自己维护，每个动作都更新很便宜；图标角点和页面内浮层要靠注入，
+ * 每个动作各注一次等于给单次动作加了两次往返。
+ * 所以第一次操作某个标签页时全量打标记，之后浮层最多每 5 秒刷一次：可见性不变，
+ * 用户仍然能看到"这个页面正被操作"，只是不再每个动作都重画一遍。
+ */
+const INDICATOR_MIN_INTERVAL_MS = 5000;
+
+/** 每个标签页最近一次刷新浮层的时间。只用于节流，不持久化。 */
+const lastIndicatorAt = new Map();
+
 // 用 storage.local 而非 storage.session：session 在扩展重载时会清空，
 // 而页面上的标记（标题前缀、图标角标）是留在页面里的，会变成清不掉的残留。
 
@@ -143,6 +156,7 @@ export async function removeBadge(tabId) {
   }
   const favicon = await unmarkFavicon(tabId);
   markedTabs.delete(tabId);
+  lastIndicatorAt.delete(tabId);
   return !!(favicon && favicon.ok);
 }
 
@@ -188,15 +202,37 @@ const ACTION_LABEL = {
   unmark: '清除标记'
 };
 
+/** 标签页关闭时丢掉节流记录（标记本身的清理由调用方负责）。 */
+export function forgetTab(tabId) {
+  lastIndicatorAt.delete(tabId);
+}
+
 /** 标记一个标签页，并显示最近操作。 */
 
 export async function markTab(tabId, action, detail) {
   const label = ACTION_LABEL[action] || action;
   const tip = detail ? `${label}：${detail}` : label;
+  const text = `agent 正在${label}${detail ? '：' + detail : ''}`;
+  // applyBadge 会把 tabId 加进 markedTabs，所以"是否已标记"必须在它之前读
+  const alreadyMarked = markedTabs.has(tabId);
+
   await applyBadge(tabId, tip, action);
-  await markFavicon(tabId, BADGE_COLORS[action] || BADGE_COLOR);
-  await showIndicator(tabId, `agent 正在${label}${detail ? '：' + detail : ''}`, undefined, action);
-  await saveMarks();
+
+  if (!alreadyMarked) {
+    // 第一次碰这个标签页：图标角点与浮层都要到位，并把标记落盘
+    await markFavicon(tabId, BADGE_COLORS[action] || BADGE_COLOR);
+    await showIndicator(tabId, text, undefined, action);
+    lastIndicatorAt.set(tabId, Date.now());
+    await saveMarks();
+    return;
+  }
+
+  // 已经标记过：只按间隔刷新浮层，不再重复注入
+  const last = lastIndicatorAt.get(tabId) || 0;
+  if (Date.now() - last >= INDICATOR_MIN_INTERVAL_MS) {
+    await showIndicator(tabId, text, undefined, action);
+    lastIndicatorAt.set(tabId, Date.now());
+  }
 }
 
 /** 在标签栏的站点图标上叠加角标，让用户一眼看出该标签页正被操作。 */

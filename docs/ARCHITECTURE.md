@@ -108,7 +108,7 @@ Mutable state that used to be scattered across `server.js` now has one home: `sr
 | `actions.js` | re-exports `actions-*.js`, so importers keep one path | actions-* |
 | `guards.js` | timeouts, frame selection, tab resolution, permission checks | nothing |
 | `config.js` | bridge URL, poll timings, browser identity | nothing |
-| `marks.js` | the visible "an agent touched this tab" state | inject-mark, config, guards |
+| `marks.js` | the visible "an agent touched this tab" state — badge and title follow every action, the page-side dot and overlay are injected once per tab and refreshed on an interval | inject-mark, config, guards |
 | `ws.js` | WebSocket channel to the bridge: reconnect, auth via hello, task push down, result frames up | config |
 | `background.js` | task dispatch, poll fallback loop, boot, listeners, error log | config, marks, actions, ws.js |
 

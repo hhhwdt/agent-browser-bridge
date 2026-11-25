@@ -87,6 +87,18 @@ reconstructing them from the code alone would be guesswork.
 
 ### Changed
 
+- Steady-state throughput is 3.7x higher, measured with `test/bench-throughput.js` on a local page:
+  `eval` went from 13.0 ms to 3.5 ms per call serially (77 to 285 ops/s), and eight tabs in parallel
+  from 270 to 1034 ops/s. Two causes, both fixed:
+  - The page-side marks (favicon dot, in-page overlay) were re-injected on every action — two extra
+    script injections per call. They are now applied once per tab and refreshed on an interval; the
+    badge and title still follow every action, so nothing is ever unmarked.
+  - Every audit line cost three synchronous filesystem calls (`statSync`, `mkdirSync`,
+    `appendFileSync`) on the server's event loop. Lines produced in the same event-loop turn are now
+    written in one asynchronous append, and `SIGINT`/`SIGTERM` flush what is pending before exit.
+- `test/bench-throughput.js` records the before/after numbers, so a future change can be compared
+  instead of guessed at.
+
 - Restart is no longer paid by the first task. The server starts the host pool as soon as it listens
   (`ABB_DESKTOP_WARM=0` goes back to lazy start) and then pre-compiles the `windows` and `uia`
   capability libraries on every host, so the first desktop action lands on a warm process instead of
