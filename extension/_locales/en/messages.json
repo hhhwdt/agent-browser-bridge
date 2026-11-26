@@ -33,7 +33,7 @@
     "message": "Clear all marks"
   },
   "marksHint": {
-    "message": "Marks add 🤖 before the tab title and a dot on the icon, showing which pages an agent is operating on."
+    "message": "Marks add 🤖 before the tab title and a dot on the icon while a page is being operated. They clear themselves about 3 minutes after the last action."
   },
   "originsHeading": {
     "message": "Authorised sites:"

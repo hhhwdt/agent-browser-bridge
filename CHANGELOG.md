@@ -8,6 +8,18 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [1.9.5] - 2026-11-26
+
+### Fixed
+
+- The popup's "Tabs marked" count never went down. The page-side marks (title prefix, favicon dot)
+  expire after three minutes by themselves, but the extension's record was permanent — so the count
+  kept claiming work was in progress long after the marks had gone. The record now carries the same
+  expiry: it is extended by every action, pruned by the keepalive alarm, when the popup opens and at
+  startup, and a closed tab is dropped too. An explicit `mark` with no TTL stays until cleared.
+- `diag` read the mark list from `storage.session` while marks are stored in `storage.local`, so it
+  always reported zero. It now reports the live set.
+
 ## [1.9.4] - 2026-11-26
 
 ### Fixed

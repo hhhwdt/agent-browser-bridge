@@ -11,7 +11,7 @@
 'use strict';
 
 import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
-import { MARKS_KEY, collectMarkedTabs, forgetTab, loadMarks, markTab, markTask, markedTabs, saveMarks, unmarkTask } from './marks.js';
+import { MARKS_KEY, collectMarkedTabs, forgetTab, loadMarks, markTab, markTask, markedTabs, pruneMarks, saveMarks, unmarkTask } from './marks.js';
 import { startWs, retryWs, wsConnected, wsState, sendResult } from './ws.js';
 import { pairIfNeeded, repairAfterRejected } from './pair.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
@@ -30,10 +30,9 @@ async function diagAction() {
     const stored = await chrome.storage.session.get(ERROR_LOG_KEY);
     errors = (stored && stored[ERROR_LOG_KEY]) || [];
   } catch (e) { /* 忽略 */ }
-  try {
-    const stored = await chrome.storage.session.get(MARKS_KEY);
-    marks = (stored && stored[MARKS_KEY]) || [];
-  } catch (e) { /* 忽略 */ }
+  // 标记记录存在 storage.local（saveMarks），以前这里读的是 storage.session——
+  // 永远读不到，diag 一直报 0 个标记。直接报内存里的实时集合即可。
+  marks = Array.from(markedTabs);
   try {
     alarm = await chrome.alarms.get(KEEPALIVE_ALARM);
   } catch (e) { /* 忽略 */ }
@@ -389,6 +388,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // 定时唤醒，防止 MV3 服务脚本被回收后不再自行恢复。
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
+    // 标记有 3 分钟有效期：闹钟每 30 秒顺手清一次过期/已关闭的记录
+    pruneMarks().catch(() => { /* 清理失败下次再来 */ });
     pollLoop();
     // 通道救援：长轮询兜底会一直保持 SW 活动，authFailed 之类卡死的状态
     // 等不到下一次 bootstrap，闹钟在这里按同样的节拍补一条重试
@@ -448,6 +449,8 @@ try {
     (async () => {
       try {
         if (msg.action === 'status') {
+          // 先清掉过期/已关闭的标记，弹窗上的数字才是"现在还在标记的标签页"
+          try { await pruneMarks(); } catch (e) { /* 清理失败不影响读状态 */ }
           sendResponse({
             ok: true,
             browser: BROWSER_NAME,
@@ -478,7 +481,9 @@ try {
 async function bootstrap() {
   bumpBootCount();
   try {
-    loadMarks();
+    await loadMarks();
+    // 启动时就把过期/已关闭的标记清掉，别让上一次会话的残留显示成"仍在操作"
+    await pruneMarks();
   } catch (e) {
     logError('bootstrap.loadMarks', e);
   }

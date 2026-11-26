@@ -47,6 +47,22 @@ const MARKS_KEY = 'abb-marked-tabs';
 const markedTabs = new Set();
 
 /**
+ * 标记的有效期。
+ *
+ * 页面里的标记（标题前缀、图标角点）由 tabMarkInPage 自己定时清理，默认 3 分钟；
+ * 扩展这边的"已标记"名单以前永不过期，于是页面早就干净了、弹窗还显示"N 个标签页
+ * 被标记"。两边用同一个时长：到点名单自动清掉，徽标一起摘掉。
+ * 显式 mark（ttlMs=0）是例外，常驻到手动清除。
+ */
+const MARK_TTL_MS = 3 * 60 * 1000;
+
+/** 标签页 id -> 过期时间戳；0 表示永不过期。 */
+const markedAt = new Map();
+
+/** 上一次往页面里注入角点的时间，用于在过半时补一次（页面标记自己会过期）。 */
+const lastFaviconAt = new Map();
+
+/**
  * 页面内浮层的最小刷新间隔。
  *
  * 徽标和标题由扩展自己维护，每个动作都更新很便宜；图标角点和页面内浮层要靠注入，
@@ -65,9 +81,14 @@ const lastIndicatorAt = new Map();
 export async function loadMarks() {
   try {
     const stored = await chrome.storage.local.get(MARKS_KEY);
-    const ids = stored && stored[MARKS_KEY];
-    if (Array.isArray(ids)) {
-      ids.forEach((id) => markedTabs.add(id));
+    const saved = stored && stored[MARKS_KEY];
+    if (!Array.isArray(saved)) { return; }
+    for (const entry of saved) {
+      // 旧格式只有 id、没有时间：按已过期处理，升级后不要继续显示陈旧计数
+      if (typeof entry === 'number') { continue; }
+      if (!entry || typeof entry.id !== 'number') { continue; }
+      markedTabs.add(entry.id);
+      markedAt.set(entry.id, typeof entry.at === 'number' ? entry.at : 0);
     }
   } catch (e) {
     // 存储不可用时退化为仅内存记录
@@ -76,10 +97,52 @@ export async function loadMarks() {
 
 export async function saveMarks() {
   try {
-    await chrome.storage.local.set({ [MARKS_KEY]: Array.from(markedTabs) });
+    const list = Array.from(markedTabs).map((id) => ({ id, at: markedAt.get(id) || 0 }));
+    await chrome.storage.local.set({ [MARKS_KEY]: list });
   } catch (e) {
     // 保存失败不影响当前会话内的标记行为
   }
+}
+
+/**
+ * 清掉过期与已关闭标签页的标记记录。
+ *
+ * 只摘浏览器徽标、不动页面：页面里的角点和标题前缀到点会自己清（同一个时长），
+ * 再注入一次既慢又可能在冻结标签页上卡 4 秒。由保活闹钟与弹窗打开时调用。
+ */
+export async function pruneMarks() {
+  if (markedTabs.size === 0) { return []; }
+  const now = Date.now();
+  let alive = null;
+  try {
+    alive = new Set((await chrome.tabs.query({})).map((t) => t.id));
+  } catch (e) {
+    alive = null;   // 查不到就只按时间过期，不误删
+  }
+
+  const gone = [];
+  for (const id of Array.from(markedTabs)) {
+    const expiresAt = markedAt.get(id) || 0;
+    const expired = expiresAt > 0 && expiresAt <= now;
+    const closed = alive !== null && !alive.has(id);
+    if (expired || closed) { gone.push(id); }
+  }
+  if (gone.length === 0) { return []; }
+
+  for (const id of gone) {
+    try {
+      await chrome.action.setBadgeText({ tabId: id, text: '' });
+      await chrome.action.setTitle({ tabId: id, title: 'Agent Browser Bridge' });
+    } catch (e) {
+      // 标签页可能已关闭
+    }
+    markedTabs.delete(id);
+    markedAt.delete(id);
+    lastFaviconAt.delete(id);
+    lastIndicatorAt.delete(id);
+  }
+  await saveMarks();
+  return gone;
 }
 
 /**
@@ -156,6 +219,8 @@ export async function removeBadge(tabId) {
   }
   const favicon = await unmarkFavicon(tabId);
   markedTabs.delete(tabId);
+  markedAt.delete(tabId);
+  lastFaviconAt.delete(tabId);
   lastIndicatorAt.delete(tabId);
   return !!(favicon && favicon.ok);
 }
@@ -202,9 +267,11 @@ const ACTION_LABEL = {
   unmark: '清除标记'
 };
 
-/** 标签页关闭时丢掉节流记录（标记本身的清理由调用方负责）。 */
+/** 标签页关闭时丢掉内存记录（标记本身的清理由调用方负责）。 */
 export function forgetTab(tabId) {
   lastIndicatorAt.delete(tabId);
+  lastFaviconAt.delete(tabId);
+  markedAt.delete(tabId);
 }
 
 /** 标记一个标签页，并显示最近操作。 */
@@ -215,19 +282,31 @@ export async function markTab(tabId, action, detail) {
   const text = `agent 正在${label}${detail ? '：' + detail : ''}`;
   // applyBadge 会把 tabId 加进 markedTabs，所以"是否已标记"必须在它之前读
   const alreadyMarked = markedTabs.has(tabId);
+  // 每次操作都续期：标记在"最后一次操作"之后 MARK_TTL_MS 才消失
+  markedAt.set(tabId, Date.now() + MARK_TTL_MS);
 
   await applyBadge(tabId, tip, action);
 
   if (!alreadyMarked) {
     // 第一次碰这个标签页：图标角点与浮层都要到位，并把标记落盘
-    await markFavicon(tabId, BADGE_COLORS[action] || BADGE_COLOR);
+    await markFavicon(tabId, BADGE_COLORS[action] || BADGE_COLOR, MARK_TTL_MS);
+    lastFaviconAt.set(tabId, Date.now());
     await showIndicator(tabId, text, undefined, action);
     lastIndicatorAt.set(tabId, Date.now());
     await saveMarks();
     return;
   }
 
-  // 已经标记过：只按间隔刷新浮层，不再重复注入
+  // 页面里的角点自己到点会清；持续操作时在过半时补一次，别让它中途消失。
+  // 顺便把续期后的时间落盘：不落盘的话，SW 重启后读到的是第一次标记的过期时间，
+  // 会比实际早——最多早半个周期，和角点补刷的节拍一致。
+  if (Date.now() - (lastFaviconAt.get(tabId) || 0) >= MARK_TTL_MS / 2) {
+    await markFavicon(tabId, BADGE_COLORS[action] || BADGE_COLOR, MARK_TTL_MS);
+    lastFaviconAt.set(tabId, Date.now());
+    await saveMarks();
+  }
+
+  // 浮层按间隔刷新，避免每个动作都注入
   const last = lastIndicatorAt.get(tabId) || 0;
   if (Date.now() - last >= INDICATOR_MIN_INTERVAL_MS) {
     await showIndicator(tabId, text, undefined, action);
@@ -280,12 +359,16 @@ export async function markTask(task) {
   }
 
   const guard = await ensureInjectable(tab);
+  // 显式标记默认常驻（ttl=0），只有调用方给了 ttlMs 才按时过期
+  const ttl = typeof task.ttlMs === 'number' ? task.ttlMs : 0;
+  markedAt.set(tab.id, ttl > 0 ? Date.now() + ttl : 0);
   // 受限页面无法注入浮动提示，但徽标仍可用，因此这里只在完全不可用时才失败
   await applyBadge(tab.id, task.text || '已标记', 'mark');
 
   const favicon = guard.error
     ? { ok: false, error: guard.error.error }
-    : await markFavicon(tab.id, BADGE_COLOR, task.ttlMs);
+    : await markFavicon(tab.id, BADGE_COLOR, ttl);
+  if (!guard.error) { lastFaviconAt.set(tab.id, ttl > 0 ? Date.now() : 0); }
 
   if (!guard.error) {
     // ttl=0 表示常驻，直到显式清除
@@ -338,7 +421,11 @@ export async function unmarkTask(task) {
     const alive = new Set(all.map((t) => t.id));
 
     for (const id of Array.from(markedTabs)) {
-      if (!alive.has(id)) { markedTabs.delete(id); }
+      if (!alive.has(id)) {
+        markedTabs.delete(id);
+        markedAt.delete(id);
+        lastFaviconAt.delete(id);
+      }
     }
 
     targets = (await collectMarkedTabs()).filter((id) => alive.has(id));
