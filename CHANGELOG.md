@@ -8,6 +8,17 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [1.9.4] - 2026-11-26
+
+### Fixed
+
+- `read --format markdown` never worked. It passed the DOM element found by the first injection as an
+  argument to the second one, and a DOM node cannot cross `executeScript`'s argument serialisation, so
+  every call answered `element_not_found`. It now passes the `usedSelector` the first injection
+  reported and re-queries inside the same frame. The unit test used to call the converter with an
+  element directly, which is why it never noticed; it now drives the real call shape (a selector
+  string) and the readTab wiring. On a 155 KB / 3000-node page: text 19-25 ms, markdown 26-31 ms.
+
 ## [1.9.3] - 2026-11-26
 
 ### Changed

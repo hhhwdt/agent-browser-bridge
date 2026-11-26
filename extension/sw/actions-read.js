@@ -73,14 +73,15 @@ export async function readTab(task) {
       typeof task.frameId === 'number' ? task.frameId : undefined
     );
     if (picked.error) { return { ...picked.error, url: tab.url }; }
-    const el = picked.data && picked.data.el;
-    if (!el) { return { ok: false, error: 'element_not_found', url: tab.url }; }
+    // 用第一次注入回报的 usedSelector（本体选择器或自动挑中的候选）在同一个框架里
+    // 重新查一次。传元素是不行的：executeScript 的参数要经过序列化，DOM 节点过不去。
+    const sourceSelector = (picked.data && picked.data.usedSelector) || 'body';
     const md = await injectAndPick(
       tab.id,
       markdownInPage,
-      [el],
+      [sourceSelector],
       pickContentFrame(task.selector),
-      typeof task.frameId === 'number' ? task.frameId : undefined
+      picked.frameId
     );
     if (md.error) { return { ...md.error, url: tab.url }; }
     return {

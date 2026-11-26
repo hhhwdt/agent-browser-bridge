@@ -173,7 +173,16 @@ export function linksInPage(selector, filterText) {
   };
 }
 
-export function markdownInPage(el) {
+export function markdownInPage(target) {
+  // 真实调用传的是选择器字符串：DOM 元素过不了 executeScript 的参数序列化。
+  // 直接传元素只用于同一次注入内的调用与单测。
+  let el = null;
+  if (typeof target === 'string') {
+    try { el = document.querySelector(target); } catch (e) { el = null; }
+  } else if (target && typeof target === 'object') {
+    el = target;
+  }
+  if (!el && typeof document !== 'undefined') { el = document.body || null; }
   if (!el) { return { ok: false, error: 'element_not_found' }; }
 
   const inline = (node) => {
