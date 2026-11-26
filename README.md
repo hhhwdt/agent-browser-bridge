@@ -126,14 +126,15 @@ Chrome and Edge run side by side, fully isolated, with automatic routing.
 
 ### Desktop control (Windows)
 
-The bridge can also drive the local desktop directly, without the extension. Eighteen actions plus
+The bridge can also drive the local desktop directly, without the extension. Nineteen actions plus
 one batch entry point:
 
 | Capability | What it does |
 |---|---|
 | `computer_screen` | Capture every monitor, one window (PrintWindow, hardware-accelerated content included), or a rectangle; several title matches answer `ambiguous_window` (pass `hwnd` instead), a flat single-colour window capture returns `blank: true` |
-| `computer_windows` | List visible top-level windows: title, process, pid, bounds, minimised/maximised |
-| `computer_window` | activate / minimize / maximize / close a window; activate re-checks via `GetForegroundWindow` and returns `foreground` |
+| `computer_ocr` | Windows' built-in OCR over the desktop, one window or a rectangle; returns one entry per text line with **screen coordinates** that go straight into `computer_click`. This is the path for apps whose UIA tree is empty |
+| `computer_windows` | List visible top-level windows: title, process, pid, bounds, minimised/maximised; each entry carries an `index` |
+| `computer_window` | activate / minimize / maximize / close a window; activate re-checks via `GetForegroundWindow` and returns `foreground`; accepts `hwnd`, `pid`, `title` or the `index` from `computer_windows` |
 | `computer_click` `computer_move` `computer_drag` `computer_scroll` | Mouse at virtual-desktop coordinates; click answers `hitWindow` (the top-level window actually hit) and takes `ensureForeground: true` to activate, verify and only then click |
 | `computer_type` `computer_key` | Type Unicode text; dispatch keys and combos (Ctrl/Shift/Alt/Win) |
 | `computer_clipboard` | Read or write clipboard text |

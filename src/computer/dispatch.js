@@ -93,6 +93,7 @@ const FN_OF = {
 /** 动作键到默认超时。 */
 const TIMEOUT_OF = {
     computerScreen: 25000,
+    computerOcr: 30000,
     computerClipboard: 15000,
     computerNotify: 15000,
     computerMedia: 20000,
@@ -165,7 +166,8 @@ const INPUT_HINTS = {
  */
 async function buildParams(verb, body) {
     switch (verb) {
-        case 'computerScreen': {
+        case 'computerScreen':
+        case 'computerOcr': {
             let region = null;
             if (body.region) {
                 region = {
@@ -437,6 +439,17 @@ async function buildParams(verb, body) {
  * @returns {Promise<object>} payload（含 ok 字段）
  */
 async function dispatch(verb, body) {
+    // 窗口已经给过 index（computer_windows 的返回）：先换成 hwnd，再走各动作原有逻辑
+    if (body && typeof body.index === 'number' && body.index >= 0 && !(body.hwnd > 0)) {
+        const list = await exec('windows', { op: 'list' }, 30000);
+        if (list.ok === false) { return list; }
+        const picked = (list.windows || [])[body.index];
+        if (!picked) {
+            return { ok: false, error: 'index_out_of_range',
+                hint: 'index 从 0 开始；先调 computerWindows 拿最新清单，窗口可能已经关闭或重排。' };
+        }
+        body = { ...body, hwnd: picked.hwnd };
+    }
     const prepared = await buildParams(verb, body);
     const params = prepared.params;
     const timeoutMs = prepared.timeoutMs || TIMEOUT_OF[verb];
@@ -464,6 +477,27 @@ async function dispatch(verb, body) {
                     warning: '窗口截图是纯色图：窗口可能还没渲染完、无响应，或 PrintWindow 取不到加速绘制的内容。建议先 computer_window activate 再截一次。'
                 } : {}),
                 dataUrl
+            };
+        } finally {
+            try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 已尽力 */ }
+        }
+    }
+
+    if (verb === 'computerOcr') {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abb-ocr-'));
+        const out = path.join(dir, 'shot.png');
+        try {
+            const r = await exec('screen', { ...params, out, ocr: true, language: body.language }, timeoutMs);
+            if (r.ok === false) { return r; }
+            return {
+                ok: true,
+                mode: r.mode || params.mode,
+                width: r.width,
+                height: r.height,
+                origin: r.origin || null,
+                language: r.ocrLanguage || null,
+                lines: Array.isArray(r.lines) ? r.lines : [],
+                text: r.text || ''
             };
         } finally {
             try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 已尽力 */ }

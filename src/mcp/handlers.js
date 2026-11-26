@@ -323,6 +323,21 @@ const HANDLERS = {
     };
   },
 
+  async computer_ocr(a) {
+    const d = await ab.computerOcr({
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      index: a.index,
+      region: a.region,
+      language: a.language
+    });
+    if (!d.lines || d.lines.length === 0) {
+      return text('没有识别到文字。可以先用 computer_screen 看一眼画面，或换 windowTitle/region 缩小范围。');
+    }
+    return text(`${d.lines.length} 行文字（坐标可直接给 computer_click）：\n`
+      + d.lines.map((l) => `[${l.x},${l.y} ${l.w}x${l.h}] ${l.text}`).join('\n'));
+  },
+
   async computer_windows() {
     const d = await ab.computerWindows();
     if (!d.windows.length) { return text('没有发现可见窗口。'); }

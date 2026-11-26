@@ -704,6 +704,11 @@ class BrowserBridgeClient {
     return this.action('computerScreen', options);
   }
 
+  /** 识别桌面/窗口里的文字，返回文字与屏幕坐标。 */
+  computerOcr(options = {}) {
+    return this.action('computerOcr', options);
+  }
+
   /** 列出可见顶层窗口。 */
   computerWindows(options = {}) {
     return this.action('computerWindows', options);

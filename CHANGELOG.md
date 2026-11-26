@@ -8,6 +8,27 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [1.9.6] - 2026-11-26
+
+### Added
+
+- `computer_ocr`: Windows' built-in OCR over the desktop, a window or a rectangle, returning one
+  entry per text line with screen coordinates that can be passed straight to `computer_click`. This is
+  the missing path for apps whose UIA tree is empty — Qt, Electron/CEF shells, Java/Swing and games
+  can only be driven by looking at them, and OCR is what makes "look at it" work for text-only models.
+  Coordinates are image pixels plus the capture origin, verified end to end on a 240x120 region
+  (35 ms, zh-Hans-CN).
+- `index`: `computer_window`, `computer_screen` and `computer_ocr` accept the `index` that
+  `computer_windows` returns. The tool description promised it, but nothing implemented it, so
+  following the description answered `missing_target`; an out-of-range index now answers
+  `index_out_of_range`.
+
+### Changed
+
+- Desktop host errors no longer leak raw PowerShell exception text as the error code. A message that
+  looks like a code (`window_not_found`) is kept; anything else becomes `host_error` with the original
+  text in `detail`. Audit summaries and client error handling stop depending on Chinese .NET messages.
+
 ## [1.9.5] - 2026-11-26
 
 ### Fixed

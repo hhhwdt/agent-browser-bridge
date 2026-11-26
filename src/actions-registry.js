@@ -534,6 +534,7 @@ const ACTIONS = {
     mcpParams: {
       windowTitle: { type: 'string', description: '只截标题包含该子串的窗口（PrintWindow，后台窗口也能截）。' },
       hwnd: { type: 'number', description: '按句柄截窗口，比标题稳定；来自 computer_windows 的 hwnd。' },
+      index: { type: 'number', description: 'computer_windows 清单里的序号，从 0 开始。' },
       region: {
         type: 'object',
         description: '只截虚拟桌面上的一个矩形区域。',
@@ -550,6 +551,31 @@ const ACTIONS = {
       + '给窗口Title时只截该窗口（后台窗口也能截）。动手点击前先用它看清楚屏幕。'
   },
 
+  computerOcr: {
+    path: '/computer/ocr',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_ocr',
+    mcpParams: {
+      windowTitle: { type: 'string', description: '只识别标题包含该子串的窗口。' },
+      hwnd: { type: 'number', description: '按窗口句柄识别；来自 computer_windows。' },
+      index: { type: 'number', description: 'computer_windows 清单里的序号，从 0 开始。' },
+      region: {
+        type: 'object',
+        description: '只识别虚拟桌面上的一个矩形区域。',
+        properties: {
+          x: { type: 'number', description: '左上角 x' },
+          y: { type: 'number', description: '左上角 y' },
+          w: { type: 'number', description: '宽' },
+          h: { type: 'number', description: '高' }
+        }
+      },
+      language: { type: 'string', description: 'OCR 语言标签，默认跟随系统（中文系统是 zh-Hans-CN）。' }
+    },
+    mcpDescription: '用 Windows 自带 OCR 识别桌面或窗口里的文字，返回每行文字和它的屏幕坐标。'
+      + '坐标可以直接给 computer_click（用 x + w/2, y + h/2）。'
+      + '适合没有 UIA 的界面：先 ocr 找到文字，再按坐标点。没识别到就先用 computer_screen 看画面。'
+  },
   computerWindows: {
     path: '/computer/windows',
     bespoke: true,
@@ -569,6 +595,7 @@ const ACTIONS = {
       action: { type: 'string', enum: ['activate', 'minimize', 'maximize', 'close'], description: 'activate 抬到前台，close 关闭（需 force）。' },
       title: { type: 'string', description: '按标题子串匹配窗口。' },
       pid: { type: 'number', description: '按进程 id 匹配窗口。' },
+      index: { type: 'number', description: 'computer_windows 清单里的序号，从 0 开始。' },
       force: { type: 'boolean', description: 'close 需要 true；只有用户确认后才能传。' }
     },
     mcpRequired: ['action'],
@@ -868,7 +895,7 @@ const MCP_ORDER = [
   'browser_upload_file', 'browser_session', 'browser_close_tab', 'browser_clear_marks',
   'browser_status',
   /* computer 桌面控制（Windows） */
-  'computer_screen', 'computer_windows', 'computer_window',
+  'computer_screen', 'computer_ocr', 'computer_windows', 'computer_window',
   'computer_click', 'computer_move', 'computer_drag', 'computer_scroll',
   'computer_type', 'computer_key', 'computer_clipboard',
   'computer_shell', 'computer_process', 'computer_notify', 'computer_media',

@@ -22,11 +22,73 @@ public static class AbbScreen {
 '@
 $null = Add-Type -TypeDefinition $script:AbbScreenCs -ErrorAction SilentlyContinue
 
+# Built-in Windows OCR (Windows.Media.Ocr). WinRT is initialised only when the
+# caller asks for it, so a plain capture pays nothing. Line coordinates are
+# image pixels; adding the capture origin makes them screen coordinates that
+# can be fed straight to click.
+function Invoke-AbbOcrFile {
+    param([string]$Path, [string]$Language)
+
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
+    [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+    [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+    [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+
+    # PS 5.1 has no await: turn WinRT's IAsyncOperation into a Task
+    $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+            $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+            $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+    function Await($op, $type) {
+        $task = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+        $null = $task.Wait(-1)
+        return $task.Result
+    }
+
+    if ($Language) {
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage(
+            (New-Object Windows.Globalization.Language $Language))
+    }
+    else {
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    }
+    if (-not $engine) { throw 'ocr_language_unavailable' }
+
+    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Path)) ([Windows.Storage.StorageFile])
+    $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+
+    $lines = @()
+    foreach ($line in $result.Lines) {
+        $minX = [double]::MaxValue; $minY = [double]::MaxValue
+        $maxX = 0.0; $maxY = 0.0
+        foreach ($word in $line.Words) {
+            $r = $word.BoundingRect
+            if ($r.X -lt $minX) { $minX = $r.X }
+            if ($r.Y -lt $minY) { $minY = $r.Y }
+            if (($r.X + $r.Width) -gt $maxX) { $maxX = $r.X + $r.Width }
+            if (($r.Y + $r.Height) -gt $maxY) { $maxY = $r.Y + $r.Height }
+        }
+        if ($minX -eq [double]::MaxValue) { continue }
+        $lines += @{
+            text = [string]$line.Text
+            x    = [int]$minX
+            y    = [int]$minY
+            w    = [int]($maxX - $minX)
+            h    = [int]($maxY - $minY)
+        }
+    }
+    return @{ language = $engine.RecognizerLanguage.LanguageTag; lines = $lines }
+}
+
 function Invoke-AbbScreen {
     param($p)
 
     $bitmap = $null
     $graphics = $null
+    $originX = 0
+    $originY = 0
     try {
         if ($p.mode -eq 'window') {
             $hwnd = [IntPtr][int64]$p.hwnd
@@ -49,6 +111,8 @@ function Invoke-AbbScreen {
                 $h = $rect.Bottom - $rect.Top
             }
             if ($w -gt 8000 -or $h -gt 8000) { throw 'window_too_large' }
+            $originX = $rect.Left
+            $originY = $rect.Top
 
             $bitmap = New-Object System.Drawing.Bitmap $w, $h
             $g = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -73,6 +137,8 @@ function Invoke-AbbScreen {
                 if ($y + $h -gt $vs.Top + $vs.Height) { $h = $vs.Top + $vs.Height - $y }
             }
             if ($w -le 0 -or $h -le 0) { throw 'empty_region' }
+            $originX = $x
+            $originY = $y
 
             $bitmap = New-Object System.Drawing.Bitmap $w, $h
             $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -129,8 +195,26 @@ function Invoke-AbbScreen {
             mode   = [string]$p.mode
             bytes  = (Get-Item -LiteralPath $outPath).Length
             path   = $outPath
+            origin = @{ x = [int]$originX; y = [int]$originY }
         }
         if ($blank) { $result.blank = $true }
+
+        # Optional OCR: text plus screen coordinates, for UIs without UIA
+        if ($p.ocr) {
+            $ocr = Invoke-AbbOcrFile -Path $outPath -Language ([string]$p.language)
+            $result.ocrLanguage = $ocr.language
+            $result.lines = @($ocr.lines | ForEach-Object {
+                    @{
+                        text = $_.text
+                        x    = [int]($_.x + $originX)
+                        y    = [int]($_.y + $originY)
+                        w    = $_.w
+                        h    = $_.h
+                    }
+                })
+            $result.text = (@($ocr.lines | ForEach-Object { $_.text }) -join "`n")
+        }
+
         return $result
     }
     finally {

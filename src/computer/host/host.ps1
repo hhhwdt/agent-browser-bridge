@@ -104,11 +104,19 @@ while ($true) {
         Send-AbbLine @{ id = $id; ok = $true; data = $data }
     }
     catch {
+        # Known failures are thrown as short codes ('window_not_found'). Anything
+        # else is a raw .NET exception; keep the text in detail but give the
+        # caller a stable code, so audit and error handling do not have to parse
+        # Chinese PowerShell messages.
+        $msg = [string]$_.Exception.Message
+        # Codes look like window_not_found or unknown_fn:nope; anything else is
+        # a raw .NET message and gets the generic code.
+        if ($msg -match '^[a-z][a-z0-9_]{2,40}(:[^\s:]{1,60})?$') { $code = $msg } else { $code = 'host_error' }
         Send-AbbLine @{
             id     = $id
             ok     = $false
-            error  = [string]$_.Exception.Message
-            detail = [string]$_.ScriptStackTrace
+            error  = $code
+            detail = $msg + ' | ' + [string]$_.ScriptStackTrace
         }
     }
 }
