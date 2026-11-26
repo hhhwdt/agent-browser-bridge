@@ -8,6 +8,15 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [1.9.2] - 2026-11-26
+
+### Changed
+
+- The cursor now also scrolls each ancestor iframe into view (same-origin), so an operation inside an
+  embedded editor is visible even when the iframe itself was below the fold. A click in a **visible**
+  tab now waits 180 ms before dispatching its events, so the arrow is seen moving and pressing before
+  a navigation replaces the page; background tabs pay nothing, because nobody is looking at them.
+
 ## [1.9.1] - 2026-11-25
 
 ### Added

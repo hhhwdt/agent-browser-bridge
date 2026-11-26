@@ -45,6 +45,19 @@ export function typeInPage(opts) {
             && r.top >= 0 && r.left >= 0 && r.bottom <= vh && r.right <= vw;
           if (!inside) { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); }
         });
+        // 元素可能在 iframe 里，而且 iframe 本身滚出了父页面：把每一层 iframe 也滚进视野。
+        // frameElement 只有同源才拿得到；跨域会抛 SecurityError，那种情况下元素已经
+        // 滚到 iframe 中央，只要 iframe 在屏幕上箭头就可见。
+        guard(() => {
+          let win = window;
+          for (let depth = 0; depth < 8; depth++) {
+            const frameEl = win.frameElement;
+            if (!frameEl) { break; }
+            frameEl.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
+            win = win.parent;
+            if (!win || win === win.parent) { break; }
+          }
+        });
       },
       move(x, y) {
         guard(() => {
@@ -333,6 +346,19 @@ export function keyInPage(opts) {
           const inside = r && r.width > 0 && r.height > 0
             && r.top >= 0 && r.left >= 0 && r.bottom <= vh && r.right <= vw;
           if (!inside) { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); }
+        });
+        // 元素可能在 iframe 里，而且 iframe 本身滚出了父页面：把每一层 iframe 也滚进视野。
+        // frameElement 只有同源才拿得到；跨域会抛 SecurityError，那种情况下元素已经
+        // 滚到 iframe 中央，只要 iframe 在屏幕上箭头就可见。
+        guard(() => {
+          let win = window;
+          for (let depth = 0; depth < 8; depth++) {
+            const frameEl = win.frameElement;
+            if (!frameEl) { break; }
+            frameEl.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
+            win = win.parent;
+            if (!win || win === win.parent) { break; }
+          }
         });
       },
       move(x, y) {

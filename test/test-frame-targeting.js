@@ -105,7 +105,7 @@ globalThis.chrome = {
         const a = (opts.args || [])[0];
         // 与 Chrome 一致：注入的函数抛错时记到该框架的 error，不影响其他框架
         try {
-          out.push({ frameId: id, result: opts.func(a) });
+          out.push({ frameId: id, result: await opts.func(a) });
         } catch (e) {
           out.push({ frameId: id, error: { message: String(e && e.message ? e.message : e) } });
         }

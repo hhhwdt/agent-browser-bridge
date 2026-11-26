@@ -138,7 +138,7 @@ function installDom(target) {
     const target = makeTarget({ top: 5000, left: 10, bottom: 5020, right: 110, width: 100, height: 20 });
     installDom(target);
 
-    const res = clickModule.clickInPage({ selector: '#b' });
+    const res = await clickModule.clickInPage({ selector: '#b' });
     check('点击成功', res && res.ok === true, JSON.stringify(res));
     check('调了一次 scrollIntoView', scrolled === 1, `scrolled=${scrolled}`);
     check('箭头位置按滚动后的坐标算', cursorEl && cursorEl.style.left === '54px' && cursorEl.style.top === '407px',
@@ -153,7 +153,7 @@ function installDom(target) {
     const target = makeTarget({ top: 100, left: 10, bottom: 120, right: 110, width: 100, height: 20 });
     installDom(target);
 
-    const res = clickModule.clickInPage({ selector: '#b' });
+    const res = await clickModule.clickInPage({ selector: '#b' });
     check('点击成功', res && res.ok === true, JSON.stringify(res));
     check('没有滚动页面', scrolled === 0, `scrolled=${scrolled}`);
     check('箭头仍然出现并进了 top layer', cursorEl && cursorEl.style.left === '54px' && popoverThrows === false,
@@ -166,7 +166,7 @@ function installDom(target) {
     const target = makeTarget({ top: 100, left: 10, bottom: 120, right: 110, width: 100, height: 20 });
     installDom(target);
 
-    const res = clickModule.clickInPage({ selector: '#b' });
+    const res = await clickModule.clickInPage({ selector: '#b' });
     check('点击仍然成功', res && res.ok === true, JSON.stringify(res));
     check('popover 属性被摘掉（否则会被 display:none 隐藏）',
       cursorEl && cursorEl.hasAttribute('popover') === false,
@@ -186,6 +186,45 @@ function installDom(target) {
     check('调了一次 scrollIntoView', scrolled === 1, `scrolled=${scrolled}`);
     check('箭头出现在滚动后的位置', cursorEl && cursorEl.style.top === '407px',
       cursorEl ? String(cursorEl.style.top) : 'no cursor');
+  }
+
+  console.log('\n[5] 元素在 iframe 里：外层 iframe 也滚进视野');
+  {
+    scrolled = 0; popovers = 0; popoverThrows = false; cursorEl = null;
+    const target = makeTarget({ top: 100, left: 10, bottom: 120, right: 110, width: 100, height: 20 });
+    installDom(target);
+    let frameScrolled = 0;
+    globalThis.frameElement = { scrollIntoView: () => { frameScrolled++; } };
+    globalThis.parent = globalThis;
+
+    await clickModule.clickInPage({ selector: '#b' });
+    check('元素本身已可见，不再滚它', scrolled === 0, `scrolled=${scrolled}`);
+    check('外层 iframe 被滚进视野', frameScrolled === 1, `frameScrolled=${frameScrolled}`);
+
+    delete globalThis.frameElement;
+    delete globalThis.parent;
+  }
+
+  console.log('\n[6] 只在可见标签页里等那一拍（后台标签页不拖时间）');
+  {
+    const realSetTimeout = globalThis.setTimeout;
+    const delays = [];
+    globalThis.setTimeout = (fn, ms) => { delays.push(ms); return realSetTimeout(fn, 0); };
+    try {
+      for (const state of ['visible', 'hidden']) {
+        delays.length = 0; scrolled = 0; popovers = 0; cursorEl = null;
+        const target = makeTarget({ top: 100, left: 10, bottom: 120, right: 110, width: 100, height: 20 });
+        installDom(target);
+        globalThis.document.visibilityState = state;
+
+        await clickModule.clickInPage({ selector: '#b' });
+        check(`visibility=${state}：${state === 'visible' ? '有' : '没有'} 180ms 的展示等待`,
+          state === 'visible' ? delays.indexOf(180) >= 0 : delays.indexOf(180) < 0,
+          JSON.stringify(delays));
+      }
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
   }
 
   console.log(`\n通过 ${pass}，失败 ${fail}`);

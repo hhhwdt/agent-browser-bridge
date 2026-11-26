@@ -6,7 +6,7 @@
  * tools/check-inject-scope.js 静态把关。
  */
 
-export function clickInPage(opts) {
+export async function clickInPage(opts) {
   const wantedIndex = typeof opts.index === 'number' && opts.index >= 0 ? opts.index : 0;
   const allowNonLink = !!opts.allowNonLink;
   const isMainFrame = (function () { try { return window === window.top; } catch (e) { return false; } })();
@@ -46,6 +46,19 @@ export function clickInPage(opts) {
           const inside = r && r.width > 0 && r.height > 0
             && r.top >= 0 && r.left >= 0 && r.bottom <= vh && r.right <= vw;
           if (!inside) { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); }
+        });
+        // 元素可能在 iframe 里，而且 iframe 本身滚出了父页面：把每一层 iframe 也滚进视野。
+        // frameElement 只有同源才拿得到；跨域会抛 SecurityError，那种情况下元素已经
+        // 滚到 iframe 中央，只要 iframe 在屏幕上箭头就可见。
+        guard(() => {
+          let win = window;
+          for (let depth = 0; depth < 8; depth++) {
+            const frameEl = win.frameElement;
+            if (!frameEl) { break; }
+            frameEl.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
+            win = win.parent;
+            if (!win || win === win.parent) { break; }
+          }
         });
       },
       move(x, y) {
@@ -206,7 +219,7 @@ export function clickInPage(opts) {
   // 派发完整的鼠标事件序列。
   // 只用 element.click() 不够：React/Vue 等框架常把处理器绑在 mousedown/pointerdown
   // 上，合成 click 不会触发它们，导致"点编辑按钮"这类操作静默失效。
-  const simulateClick = (el) => {
+  const simulateClick = async (el) => {
     // 先把目标滚进视野，箭头才看得见；已经可见时不动用户的滚动位置
     cursor.reveal(el);
     const rect = el.getBoundingClientRect();
@@ -217,6 +230,19 @@ export function clickInPage(opts) {
     // cursor 至少包含一个动作类型，因此探测路径（probe/dryRun）不会走到这里。
     cursor.move(cx, cy);
     cursor.press();
+
+    // 可见的标签页里稍等一下再派发事件，让人看清箭头移过去、按下去。
+    // 链接/表单提交会立刻跳转，旧页面连同箭头一起被替换——这一等是唯一能
+    // "看见"这次点击的机会。后台标签页没人看，不付这份时间。
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      await new Promise((r) => setTimeout(r, 180));
+      try {
+        const after = el.getBoundingClientRect();
+        if (after && (after.left !== rect.left || after.top !== rect.top)) {
+          cursor.move(after.left + after.width / 2, after.top + after.height / 2);
+        }
+      } catch (e) { /* 元素可能已在动画中消失 */ }
+    }
 
     const common = {
       bubbles: true,
@@ -256,7 +282,7 @@ export function clickInPage(opts) {
   };
 
   try {
-    simulateClick(clickTarget);
+    await simulateClick(clickTarget);
   } catch (e) {
     return { ok: false, error: 'click_failed', message: String(e && e.message ? e.message : e), info };
   }
