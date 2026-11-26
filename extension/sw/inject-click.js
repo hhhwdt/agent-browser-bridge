@@ -17,25 +17,48 @@ export function clickInPage(opts) {
   const cursor = (function () {
     const ensureCursor = () => {
       let el = document.getElementById('__abb_virtual_cursor__');
-      if (el && el.dataset.abbCursorVer !== '2') { el.remove(); el = null; } /* 扩展更新后旧元素按版本号重建 */
+      if (el && el.dataset.abbCursorVer !== '3') { el.remove(); el = null; } /* 扩展更新后旧元素按版本号重建 */
       if (!el) {
         el = document.createElement('div');
         el.id = '__abb_virtual_cursor__';
-        el.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;'
+        // popover 让光标进 top layer：<dialog>、popover、全屏元素会盖住任何 z-index，
+        // 只有 top layer 压得住。不支持的浏览器忽略这个属性，退回普通 fixed。
+        try { if (typeof el.showPopover === 'function') { el.setAttribute('popover', 'manual'); } } catch (e) { /* 忽略 */ }
+        el.style.cssText = 'position:fixed;left:0;top:0;margin:0;padding:0;border:0;background:transparent;'
+          + 'inset:auto;overflow:visible;pointer-events:none;z-index:2147483647;'
           + 'width:32px;height:32px;transition:left .18s ease-out,top .18s ease-out,transform .08s ease-in;'
           + 'filter:drop-shadow(1px 2px 2px rgba(0,0,0,.35));';
         el.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32"><path d="M5 3l14 9-6.5 1.5L9 20z" '
           + 'fill="#fff" stroke="#f85149" stroke-width="1.5" stroke-linejoin="round"/></svg>';
         document.documentElement.appendChild(el);
-        el.dataset.abbCursorVer = '2';
+        el.dataset.abbCursorVer = '3';
       }
       return el;
     };
     const guard = (fn) => { try { fn(); } catch (e) { /* 可视化失败不影响动作 */ } };
     return {
+      /** 目标不在视野里就先滚到中间：箭头必须出现在用户看得见的地方。 */
+      reveal(target) {
+        guard(() => {
+          const r = target.getBoundingClientRect();
+          const vw = window.innerWidth || 0;
+          const vh = window.innerHeight || 0;
+          const inside = r && r.width > 0 && r.height > 0
+            && r.top >= 0 && r.left >= 0 && r.bottom <= vh && r.right <= vw;
+          if (!inside) { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); }
+        });
+      },
       move(x, y) {
         guard(() => {
           const el = ensureCursor();
+          if (el.hasAttribute('popover')) {
+            try {
+              if (!el.matches(':popover-open')) { el.showPopover(); }
+            } catch (e) {
+              // 打开失败就去掉属性，否则 [popover] 未打开会被 UA 样式 display:none 隐藏
+              try { el.removeAttribute('popover'); } catch (e2) { /* 忽略 */ }
+            }
+          }
           el.style.left = (x - 6) + 'px';
           el.style.top = (y - 3) + 'px';
         });
@@ -184,6 +207,8 @@ export function clickInPage(opts) {
   // 只用 element.click() 不够：React/Vue 等框架常把处理器绑在 mousedown/pointerdown
   // 上，合成 click 不会触发它们，导致"点编辑按钮"这类操作静默失效。
   const simulateClick = (el) => {
+    // 先把目标滚进视野，箭头才看得见；已经可见时不动用户的滚动位置
+    cursor.reveal(el);
     const rect = el.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;

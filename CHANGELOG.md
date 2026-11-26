@@ -8,10 +8,14 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
-## [Unreleased]
+## [1.9.1] - 2026-11-25
 
 ### Added
 
+- The virtual cursor is now always visible on the page being operated. Before an action it scrolls
+  an off-screen target into the middle of the viewport (an on-screen target is left alone), and the
+  arrow itself lives in the top layer via the Popover API, so a native `<dialog>`, a popover or a
+  fullscreen element can no longer cover it. It still draws nothing during a probe or dry run.
 - Desktop control on Windows (`computer_*`): eighteen actions executed by the bridge itself, outside
   the extension — screen capture (every monitor, one window through PrintWindow, or a rectangle),
   window listing plus activate/minimize/maximize/close, mouse move/click/drag/scroll, Unicode typing

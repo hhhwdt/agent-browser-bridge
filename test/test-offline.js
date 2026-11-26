@@ -55,6 +55,7 @@ const SUITES = [
   ['没有没人引用的死文件', path.join('..', 'tools', 'check-orphans.js')],
   ['动作失败时不报成功', 'test-result-semantics.js'],
   ['连续动作只打一次页面内标记', 'test-mark-throttle.js'],
+  ['虚拟光标一定在视野里', 'test-cursor-visibility.js'],
   ['零输入配对：向本机宿主要 token', 'test-pair.js'],
   ['弹窗 i18n key 与 locale 文件一致', 'test-i18n-keys.js'],
   ['wait 条件成立与超时', 'test-wait.js'],
