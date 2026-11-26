@@ -103,6 +103,8 @@ for (const [method, paths, handler] of [
   /* computer 动作族：本地执行，不经扩展（见 src/computer/） */
   ['POST', ['/computer/screen'], computer.routeScreen],
   ['POST', ['/computer/ocr'], computer.routeOcr],
+  ['POST', ['/computer/findImage'], computer.routeFindImage],
+  ['POST', ['/computer/diff'], computer.routeDiff],
   ['POST', ['/computer/windows'], computer.routeWindows],
   ['POST', ['/computer/window'], computer.routeWindow],
   ['POST', ['/computer/click'], computer.routeClick],

@@ -358,6 +358,8 @@ async function routeBatch(req, res) {
 module.exports = {
     routeScreen: handler('computerScreen'),
     routeOcr: handler('computerOcr'),
+    routeFindImage: handler('computerFindImage'),
+    routeDiff: handler('computerDiff'),
     routeWindows: handler('computerWindows'),
     routeWindow: handler('computerWindow'),
     routeClick: handler('computerClick'),

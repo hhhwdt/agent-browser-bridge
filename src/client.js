@@ -709,6 +709,16 @@ class BrowserBridgeClient {
     return this.action('computerOcr', options);
   }
 
+  /** 在屏幕/窗口/区域里找模板图片，返回中心坐标。 */
+  computerFindImage(options = {}) {
+    return this.action('computerFindImage', options);
+  }
+
+  /** 比较两张截图，返回变化比例与变化区域。 */
+  computerDiff(options = {}) {
+    return this.action('computerDiff', options);
+  }
+
   /** 列出可见顶层窗口。 */
   computerWindows(options = {}) {
     return this.action('computerWindows', options);

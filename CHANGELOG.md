@@ -8,6 +8,22 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [1.9.7] - 2026-11-26
+
+### Added
+
+- `computer_find_image`: locate a template PNG — an icon, a graphical button — in the desktop, a
+  window or a rectangle, and answer its centre in screen coordinates. This is the third way to see a
+  UI, after UIA (structured) and OCR (text): control that has neither now becomes reachable by
+  capturing it once with `computer_screen` + `region` + `savePath`. Coarse-to-fine grayscale match;
+  returns the similarity score and `found: false` when nothing is close enough. Verified against a
+  generated image: found the icon at exactly (260,180) with a score above 0.95.
+- `computer_diff`: compare two same-size screenshots and answer "did that click actually do
+  anything" — changed or not, the changed ratio, and the bounding box. Verified on a generated pair:
+  the box matched the edited 30×20 region exactly, and an identical pair reports no change.
+- `computer_screen` takes `savePath`, writing the frame to disk so it can serve as a template or as
+  the before/after of a diff.
+
 ## [1.9.6] - 2026-11-26
 
 ### Added

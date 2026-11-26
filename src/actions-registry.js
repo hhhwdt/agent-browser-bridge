@@ -535,6 +535,7 @@ const ACTIONS = {
       windowTitle: { type: 'string', description: '只截标题包含该子串的窗口（PrintWindow，后台窗口也能截）。' },
       hwnd: { type: 'number', description: '按句柄截窗口，比标题稳定；来自 computer_windows 的 hwnd。' },
       index: { type: 'number', description: 'computer_windows 清单里的序号，从 0 开始。' },
+      savePath: { type: 'string', description: '同时把这张图保存到这个绝对路径（做模板、做前后对比用）。' },
       region: {
         type: 'object',
         description: '只截虚拟桌面上的一个矩形区域。',
@@ -575,6 +576,47 @@ const ACTIONS = {
     mcpDescription: '用 Windows 自带 OCR 识别桌面或窗口里的文字，返回每行文字和它的屏幕坐标。'
       + '坐标可以直接给 computer_click（用 x + w/2, y + h/2）。'
       + '适合没有 UIA 的界面：先 ocr 找到文字，再按坐标点。没识别到就先用 computer_screen 看画面。'
+  },
+  computerFindImage: {
+    path: '/computer/findImage',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_find_image',
+    mcpParams: {
+      template: { type: 'string', description: '模板图片的绝对路径（PNG）。用 computer_screen + region + savePath 截一块当模板。' },
+      threshold: { type: 'number', description: '相似度阈值 0–1，默认 0.85。找不到时看返回的 score 再决定降不降。' },
+      windowTitle: { type: 'string', description: '只在这个窗口里找。' },
+      hwnd: { type: 'number', description: '按窗口句柄找。' },
+      index: { type: 'number', description: 'computer_windows 里的序号。' },
+      region: {
+        type: 'object',
+        description: '只在虚拟桌面的这个矩形里找。',
+        properties: {
+          x: { type: 'number', description: '左上角 x' },
+          y: { type: 'number', description: '左上角 y' },
+          w: { type: 'number', description: '宽' },
+          h: { type: 'number', description: '高' }
+        }
+      }
+    },
+    mcpRequired: ['template'],
+    mcpDescription: '在屏幕/窗口/区域里找一张模板图片（图标、图形按钮），返回它中心的屏幕坐标，可直接给 computer_click。'
+      + '适合既没有文字也没有 UIA 的控件：先用 computer_screen 配 region+savePath 截一块当模板，之后每次用它定位。'
+      + '分辨率或缩放变了、界面换主题了都要重截模板。'
+  },
+  computerDiff: {
+    path: '/computer/diff',
+    bespoke: true,
+    timeout: 30000,
+    mcp: 'computer_diff',
+    mcpParams: {
+      before: { type: 'string', description: '操作前截图的绝对路径（computer_screen + savePath）。' },
+      after: { type: 'string', description: '操作后截图的绝对路径。' },
+      threshold: { type: 'number', description: '逐像素颜色差阈值 0–255，默认 24。' }
+    },
+    mcpRequired: ['before', 'after'],
+    mcpDescription: '比较两张截图，回答"刚才那一下到底生效没有"：返回是否变化、变化比例、变化区域的包围盒。'
+      + '两张图必须同尺寸——同一个窗口或同一个区域各截一次。'
   },
   computerWindows: {
     path: '/computer/windows',
@@ -895,7 +937,7 @@ const MCP_ORDER = [
   'browser_upload_file', 'browser_session', 'browser_close_tab', 'browser_clear_marks',
   'browser_status',
   /* computer 桌面控制（Windows） */
-  'computer_screen', 'computer_ocr', 'computer_windows', 'computer_window',
+  'computer_screen', 'computer_ocr', 'computer_find_image', 'computer_diff', 'computer_windows', 'computer_window',
   'computer_click', 'computer_move', 'computer_drag', 'computer_scroll',
   'computer_type', 'computer_key', 'computer_clipboard',
   'computer_shell', 'computer_process', 'computer_notify', 'computer_media',

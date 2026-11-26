@@ -41,6 +41,7 @@ $script:AbbHandlers = @{
     'notify'  = { param($p) Invoke-AbbNotify $p }
     'audio'   = { param($p) Invoke-AbbAudio $p }
     'uia'     = { param($p) Invoke-AbbUia $p }
+    'vision'  = { param($p) Invoke-AbbVision $p }
     'ping'    = { param($p) @{ ok = $true; pong = [DateTime]::UtcNow.ToString('o') } }
 }
 
@@ -88,6 +89,7 @@ while ($true) {
                     . (Join-Path $PSScriptRoot 'lib\windows.ps1')
                     . (Join-Path $PSScriptRoot 'lib\uia.ps1')
                 }
+                'vision' { . (Join-Path $PSScriptRoot 'lib\vision.ps1') }
                 default { }
             }
             $script:AbbLoaded[$fn] = $true

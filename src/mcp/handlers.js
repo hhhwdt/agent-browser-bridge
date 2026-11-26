@@ -338,6 +338,29 @@ const HANDLERS = {
       + d.lines.map((l) => `[${l.x},${l.y} ${l.w}x${l.h}] ${l.text}`).join('\n'));
   },
 
+  async computer_find_image(a) {
+    const d = await ab.computerFindImage({
+      template: a.template,
+      threshold: a.threshold,
+      windowTitle: a.windowTitle,
+      hwnd: a.hwnd,
+      index: a.index,
+      region: a.region
+    });
+    if (!d.found) {
+      return text(`没找到（最高相似度 ${d.score}，阈值 ${d.threshold}）。`
+        + '可以调低 threshold、换更小更独特的模板，或先用 computer_screen 确认界面没变。');
+    }
+    return text(`找到：中心 (${d.center.x}, ${d.center.y})，区域 ${d.w}x${d.h} 从 (${d.x}, ${d.y}) 起，相似度 ${d.score}。`);
+  },
+
+  async computer_diff(a) {
+    const d = await ab.computerDiff({ before: a.before, after: a.after, threshold: a.threshold });
+    if (d.sizeMismatch) { return text(d.note || '两张图尺寸不同，无法比较。'); }
+    if (!d.changed) { return text('没有检测到变化。'); }
+    return text(`有变化：占比 ${(d.ratio * 100).toFixed(2)}%，变化区域 (${d.box.x}, ${d.box.y}) ${d.box.w}x${d.box.h}。`);
+  },
+
   async computer_windows() {
     const d = await ab.computerWindows();
     if (!d.windows.length) { return text('没有发现可见窗口。'); }

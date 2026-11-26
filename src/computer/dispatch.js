@@ -94,6 +94,8 @@ const FN_OF = {
 const TIMEOUT_OF = {
     computerScreen: 25000,
     computerOcr: 30000,
+    computerFindImage: 30000,
+    computerDiff: 30000,
     computerClipboard: 15000,
     computerNotify: 15000,
     computerMedia: 20000,
@@ -167,7 +169,8 @@ const INPUT_HINTS = {
 async function buildParams(verb, body) {
     switch (verb) {
         case 'computerScreen':
-        case 'computerOcr': {
+        case 'computerOcr':
+        case 'computerFindImage': {
             let region = null;
             if (body.region) {
                 region = {
@@ -426,6 +429,9 @@ async function buildParams(verb, body) {
             return { params, timeoutMs: params.timeoutMs + 8000 };
         }
 
+        case 'computerDiff':
+            return { params: {} };
+
         default:
             throw new VerbError('unknown_action', '未知动作：' + verb);
     }
@@ -458,7 +464,7 @@ async function dispatch(verb, body) {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abb-shot-'));
         const out = path.join(dir, 'shot.png');
         try {
-            const r = await exec('screen', { ...params, out }, timeoutMs);
+            const r = await exec('screen', { ...params, out, savePath: body.savePath }, timeoutMs);
             if (r.ok === false) { return r; }
             let dataUrl;
             try {
@@ -476,6 +482,7 @@ async function dispatch(verb, body) {
                     blank: true,
                     warning: '窗口截图是纯色图：窗口可能还没渲染完、无响应，或 PrintWindow 取不到加速绘制的内容。建议先 computer_window activate 再截一次。'
                 } : {}),
+                ...(body.savePath ? { savedPath: body.savePath } : {}),
                 dataUrl
             };
         } finally {
@@ -502,6 +509,57 @@ async function dispatch(verb, body) {
         } finally {
             try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 已尽力 */ }
         }
+    }
+
+    if (verb === 'computerFindImage') {
+        if (typeof body.template !== 'string' || !body.template.trim()) {
+            return { ok: false, error: 'missing_template', hint: '需要 template（模板 PNG 的绝对路径）。先用 computer_screen + region + savePath 截一块。' };
+        }
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abb-find-'));
+        const out = path.join(dir, 'screen.png');
+        try {
+            const shot = await exec('screen', { ...params, out }, timeoutMs);
+            if (shot.ok === false) { return shot; }
+            const r = await exec('vision', {
+                op: 'match',
+                screen: out,
+                template: body.template,
+                threshold: typeof body.threshold === 'number' ? body.threshold : undefined
+            }, timeoutMs);
+            if (r.ok === false) { return r; }
+            if (!r.found) {
+                return { ok: true, found: false, score: r.score, threshold: r.threshold, template: r.template };
+            }
+            const ox = shot.origin ? shot.origin.x : 0;
+            const oy = shot.origin ? shot.origin.y : 0;
+            const x = ox + r.x;
+            const y = oy + r.y;
+            return {
+                ok: true,
+                found: true,
+                x,
+                y,
+                w: r.w,
+                h: r.h,
+                center: { x: x + Math.floor(r.w / 2), y: y + Math.floor(r.h / 2) },
+                score: r.score,
+                origin: { x: ox, y: oy }
+            };
+        } finally {
+            try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 已尽力 */ }
+        }
+    }
+
+    if (verb === 'computerDiff') {
+        if (typeof body.before !== 'string' || typeof body.after !== 'string') {
+            return { ok: false, error: 'missing_images', hint: '需要 before 与 after（两张截图的绝对路径）。' };
+        }
+        return await exec('vision', {
+            op: 'diff',
+            before: body.before,
+            after: body.after,
+            threshold: typeof body.threshold === 'number' ? body.threshold : undefined
+        }, timeoutMs);
     }
 
     if (verb === 'computerWindows') {

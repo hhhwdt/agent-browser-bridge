@@ -90,6 +90,8 @@ const CAPABILITIES = [
   'multiBrowser', // 多浏览器隔离与路由
   'computerScreen',    // 桌面/窗口截图（Windows，本地执行）
   'computerOcr',       // Windows 自带 OCR，返回文字与屏幕坐标
+  'computerFindImage', // 模板图片匹配（图标/图形按钮）
+  'computerDiff',      // 前后截图对比
   'computerWindows',   // 列出顶层窗口
   'computerWindow',    // 窗口动作（activate/minimize/maximize/close 需确认）
   'computerClick',     // 鼠标点击

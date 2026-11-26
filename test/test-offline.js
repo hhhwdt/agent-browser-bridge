@@ -71,6 +71,7 @@ const SUITES = [
   ['桌面写锁与 agent 身份', 'test-desktop-broker.js'],
   ['桌面策略、幂等与指标', 'test-desktop-runtime.js'],
   ['桌面 OCR 识别文字与坐标', 'test-desktop-ocr.js'],
+  ['桌面图标模板匹配与前后对比', 'test-desktop-vision.js'],
   ['常驻桌面宿主（需 Windows）', 'test-desktop-host.js'],
   ['MCP 协议（自己充当客户端）', 'test-mcp.js']
 ];

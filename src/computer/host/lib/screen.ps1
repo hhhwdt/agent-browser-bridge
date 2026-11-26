@@ -163,6 +163,16 @@ function Invoke-AbbScreen {
         $outPath = [string]$p.out
         $bitmap.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
 
+        # savePath: caller wants to keep this frame (template, before/after diff)
+        if ($p.savePath) {
+            $savePath = [string]$p.savePath
+            $saveDir = Split-Path -Parent $savePath
+            if ($saveDir -and -not (Test-Path -LiteralPath $saveDir)) {
+                $null = New-Item -ItemType Directory -Path $saveDir -Force
+            }
+            Copy-Item -LiteralPath $outPath -Destination $savePath -Force
+        }
+
         # Window captures can come back as a single flat color (window not yet
         # rendered / unfocused / content PrintWindow could not get). Sample a
         # grid and flag it so the caller cannot mistake blank output for what
