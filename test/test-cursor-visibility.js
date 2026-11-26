@@ -62,20 +62,21 @@ function makeCursorEl() {
   return el;
 }
 
-/** 目标元素：可点击的按钮。 */
-function makeTarget(rect) {
+/** 目标元素：默认可点击的按钮；opts.link=true 时是链接。 */
+function makeTarget(rect, opts) {
+  const o = opts || {};
   const el = {
-    tagName: 'BUTTON',
+    tagName: o.link ? 'A' : 'BUTTON',
     innerText: '编辑',
     textContent: '编辑',
-    href: undefined,
+    href: o.link ? 'https://e.test/next' : undefined,
     isConnected: true,
     _events: [],
     rect,
     classList: { contains: () => false },
     getAttribute: () => '',
     hasAttribute: () => false,
-    closest: () => null,
+    closest: (sel) => (o.link && sel === 'a[href]' ? el : null),
     getBoundingClientRect: () => el.rect,
     focus: () => {},
     dispatchEvent: (ev) => { el._events.push(ev.type); return true; },
@@ -205,21 +206,29 @@ function installDom(target) {
     delete globalThis.parent;
   }
 
-  console.log('\n[6] 只在可见标签页里等那一拍（后台标签页不拖时间）');
+  console.log('\n[6] 只有"可见标签页 + 链接"才等那一拍（速度和可见性各让一步）');
   {
     const realSetTimeout = globalThis.setTimeout;
     const delays = [];
     globalThis.setTimeout = (fn, ms) => { delays.push(ms); return realSetTimeout(fn, 0); };
     try {
-      for (const state of ['visible', 'hidden']) {
+      const cases = [
+        { state: 'visible', link: true, expect: true },
+        { state: 'visible', link: false, expect: false },
+        { state: 'hidden', link: true, expect: false }
+      ];
+      for (const c of cases) {
         delays.length = 0; scrolled = 0; popovers = 0; cursorEl = null;
-        const target = makeTarget({ top: 100, left: 10, bottom: 120, right: 110, width: 100, height: 20 });
+        const target = makeTarget(
+          { top: 100, left: 10, bottom: 120, right: 110, width: 100, height: 20 },
+          { link: c.link }
+        );
         installDom(target);
-        globalThis.document.visibilityState = state;
+        globalThis.document.visibilityState = c.state;
 
         await clickModule.clickInPage({ selector: '#b' });
-        check(`visibility=${state}：${state === 'visible' ? '有' : '没有'} 180ms 的展示等待`,
-          state === 'visible' ? delays.indexOf(180) >= 0 : delays.indexOf(180) < 0,
+        check(`visibility=${c.state} ${c.link ? '链接' : '按钮'}：${c.expect ? '有' : '没有'} 180ms 展示等待`,
+          c.expect ? delays.indexOf(180) >= 0 : delays.indexOf(180) < 0,
           JSON.stringify(delays));
       }
     } finally {

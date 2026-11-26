@@ -51,10 +51,26 @@ export async function clickTab(task) {
     };
   }
 
-  // 留出时间让页面完成跳转或打开新标签页
-  await new Promise((r) => setTimeout(r, 800));
+  // 点击后最多等 settleMs（默认 250ms），不再固定 800ms：地址一变或出现新标签页
+  // 就立刻返回。同步跳转在注入结果的 urlAfter 里已经能看到，可以一次都不等。
+  // 绝大部分按钮点击并不跳转，固定等 800ms 是白等（实测 p50 830ms）。
+  const settleMs = typeof task.settleMs === 'number'
+    ? Math.min(Math.max(task.settleMs, 0), 5000)
+    : 250;
+  const deadline = Date.now() + settleMs;
+  const urlBefore = data.urlBefore || tab.url || '';
+  let navigatedNow = !!data.urlAfter && data.urlAfter !== urlBefore;
+  let afterTabs = null;
 
-  const afterTabs = await chrome.tabs.query({});
+  for (;;) {
+    afterTabs = await chrome.tabs.query({});
+    const selfNow = afterTabs.find((t) => t.id === tab.id);
+    const urlNow = selfNow ? (selfNow.url || '') : '';
+    const openedNow = afterTabs.some((t) => !beforeIds.has(t.id));
+    if (navigatedNow || openedNow || (urlNow && urlNow !== urlBefore)) { break; }
+    if (Date.now() >= deadline) { break; }
+    await new Promise((r) => setTimeout(r, 50));
+  }
   const openedTabs = afterTabs
     .filter((t) => !beforeIds.has(t.id))
     .map((t) => ({ id: t.id, url: t.url || '', title: t.title || '', active: !!t.active }));

@@ -186,7 +186,9 @@ console.log('\n[6] CLI 取值选项白名单');
     'value', 'key', 'index', 'port', 'timeout', 'host', 'idle', 'count', 'tail',
     'code', 'file', 'out', 'format', 'name', 'header', 'filename',
     // --maxBytes 过去不在表里，按开关解析吞噬了真实值，这里一并登记
-    'maxBytes'
+    'maxBytes',
+    // --settleMs：点击后等待跳转的上限
+    'settleMs'
   ]);
   const got = args.VALUE_OPTS;
   const missing = [...expected].filter((n) => !got.has(n));

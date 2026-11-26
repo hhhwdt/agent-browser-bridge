@@ -22,12 +22,14 @@ async function captureByCdp(tabId, format, clip, beyondViewport) {
     if (!shot || !shot.data) {
       throw new Error('empty_screenshot');
     }
-    // 顺带取一下页面实际尺寸，便于调用方判断
-    let metrics = null;
-    try {
-      metrics = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics');
-    } catch (e) { /* 忽略 */ }
-    const content = metrics && metrics.cssContentSize ? metrics.cssContentSize : null;
+    // 只有整页截图才需要页面实际尺寸；元素/视口截图再用不到，少一次 CDP 往返。
+    let content = null;
+    if (beyondViewport) {
+      try {
+        const metrics = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics');
+        content = metrics && metrics.cssContentSize ? metrics.cssContentSize : null;
+      } catch (e) { /* 忽略 */ }
+    }
     // 整页截图才有意义报内容尺寸；否则报视口尺寸，避免误导
     const showContentSize = !!beyondViewport;
     return {

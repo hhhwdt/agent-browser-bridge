@@ -60,6 +60,71 @@ async function cmdToken(args) {
   }
 }
 
+/**
+ * 审计统计：把"桥接花了多少"和"动作之间等了多久"分开。
+ * 后者包含模型思考和客户端处理，是"感觉慢"时最容易被误算到桥接头上的那部分。
+ */
+function printStats(lines) {
+  const rows = [];
+  for (const line of lines) {
+    try { rows.push(JSON.parse(line)); } catch (e) { /* 跳过坏行 */ }
+  }
+  if (rows.length === 0) {
+    console.log('日志里没有可解析的记录');
+    return;
+  }
+
+  const pct = (arr, p) => {
+    const sorted = arr.slice().sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+  };
+
+  const byAction = new Map();
+  for (const row of rows) {
+    const duration = typeof row.duration === 'number' ? row.duration : 0;
+    if (!byAction.has(row.action)) { byAction.set(row.action, []); }
+    byAction.get(row.action).push(duration);
+  }
+
+  console.log(`共 ${rows.length} 条记录\n`);
+  console.log('动作耗时（桥接 + 扩展 + 页面，ms）');
+  const actions = Array.from(byAction.entries()).sort((a, b) => b[1].length - a[1].length);
+  for (const [action, durations] of actions) {
+    console.log('  ' + String(action).padEnd(12)
+      + ' n=' + String(durations.length).padStart(4)
+      + '  p50=' + String(Math.round(pct(durations, 0.5))).padStart(5)
+      + '  p90=' + String(Math.round(pct(durations, 0.9))).padStart(5)
+      + '  max=' + Math.round(Math.max.apply(null, durations)));
+  }
+
+  const gaps = [];
+  for (let i = 1; i < rows.length; i++) {
+    const prev = Date.parse(rows[i - 1].timestamp);
+    const next = Date.parse(rows[i].timestamp);
+    if (!isFinite(prev) || !isFinite(next)) { continue; }
+    const gap = next - prev;
+    // 超过 10 分钟的间隔多半是人走开了，不参与统计
+    if (gap >= 0 && gap < 10 * 60 * 1000) { gaps.push(gap); }
+  }
+  if (gaps.length === 0) { return; }
+
+  console.log('\n相邻动作间隔（含 agent 思考与客户端处理，ms）');
+  console.log('  n=' + gaps.length
+    + '  p50=' + Math.round(pct(gaps, 0.5))
+    + '  p90=' + Math.round(pct(gaps, 0.9))
+    + '  max=' + Math.round(Math.max.apply(null, gaps)));
+
+  const busy = rows.reduce((sum, row) => sum + (typeof row.duration === 'number' ? row.duration : 0), 0);
+  const waiting = gaps.reduce((sum, gap) => sum + gap, 0);
+  const total = busy + waiting;
+  if (total > 0) {
+    console.log('\n桥接忙碌 ' + (busy / 1000).toFixed(1) + 's'
+      + '，动作之间等待 ' + (waiting / 1000).toFixed(1) + 's'
+      + '（桥接占 ' + ((busy / total) * 100).toFixed(1) + '%）');
+    console.log('剩下的时间在 agent 那边：模型思考 + 客户端处理。');
+  }
+}
+
 /** log 命令：读取审计日志。 */
 async function cmdLog(args) {
   const logFile = args._[1] || path.join(getConfigDir(), 'audit.jsonl');
@@ -74,6 +139,10 @@ async function cmdLog(args) {
   }
 
   const lines = content.split('\n').filter((l) => l.trim());
+  if (args.stats) {
+    printStats(lines);
+    return;
+  }
   const tail = args.tail ? parseInt(args.tail, 10) : 50;
   const tailLines = lines.slice(-tail);
 

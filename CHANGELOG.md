@@ -8,6 +8,27 @@ Notable changes are recorded here. The format follows
 development iterations of a tool that was not published; their changes are not itemised, because
 reconstructing them from the code alone would be guesswork.
 
+## [1.9.3] - 2026-11-26
+
+### Changed
+
+- `click` no longer waits a fixed 800 ms. It returns as soon as the URL changes or a new tab appears,
+  with a 250 ms cap (`settleMs`, up to 5000), and a synchronous navigation is detected in the page
+  itself. Measured on a live tab: 829 ms → 291 ms for a button, 72 ms for a same-page link.
+- `close` no longer injects into the tab it is about to destroy; the badge is cleared at the browser
+  level and the page-side mark dies with the page. It used to cost up to 8 s on a frozen tab
+  (audit p90 1.5 s).
+- Screenshots only ask CDP for page metrics when capturing the full page; element and viewport
+  captures skip the round trip.
+- The cursor lead-in (180 ms) now applies only to links in a visible tab. Buttons and background tabs
+  pay nothing; the arrow still goes into the top layer either way.
+
+### Added
+
+- `node src/cli.js log --stats` separates bridge-side action time from the gap between actions, so
+  "it feels slow" can be attributed instead of guessed at. On this machine the bridge is 3.4% of
+  wall time and the median gap between actions is 2.3 s.
+
 ## [1.9.2] - 2026-11-26
 
 ### Changed

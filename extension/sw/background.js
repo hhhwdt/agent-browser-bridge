@@ -11,7 +11,7 @@
 'use strict';
 
 import { BRIDGE_URL, BROWSER_NAME, KEEPALIVE_ALARM, POLL_TIMEOUT_MS, RETRY_DELAY_MS, TOKEN_HEADER } from './config.js';
-import { MARKS_KEY, collectMarkedTabs, forgetTab, loadMarks, markTab, markTask, markedTabs, removeBadge, saveMarks, unmarkTask } from './marks.js';
+import { MARKS_KEY, collectMarkedTabs, forgetTab, loadMarks, markTab, markTask, markedTabs, saveMarks, unmarkTask } from './marks.js';
 import { startWs, retryWs, wsConnected, wsState, sendResult } from './ws.js';
 import { pairIfNeeded, repairAfterRejected } from './pair.js';
 import { activateTab, clickTab, downloadTab, evalTab, framesDiag, grabTab, keyTab, linksTab, listTabs, mediaTab, navigateTab, readTab, saveTab, screenshotTab, sessionTab, typeTab, uploadTab, waitTab } from './actions.js';
@@ -164,7 +164,17 @@ async function closeTab(task) {
     return { ok: false, error: 'no_tab_matched', tabId: task.tabId };
   }
 
-  await removeBadge(task.tabId);
+  // 标签页马上就要销毁：只在浏览器层面清徽标，不再往页面里注入去清角点和浮层。
+  // 那次注入在慢/冻结的标签页上要等最多 4 秒，而页面随关闭一起消失（实测 close
+  // 的 p90 是 1.5 秒，几乎全耗在这里）。
+  try {
+    await chrome.action.setBadgeText({ tabId: task.tabId, text: '' });
+    await chrome.action.setTitle({ tabId: task.tabId, title: 'Agent Browser Bridge' });
+  } catch (e) {
+    // 标签页可能已经关闭
+  }
+  forgetTab(task.tabId);
+  markedTabs.delete(task.tabId);
   await saveMarks();
 
   try {

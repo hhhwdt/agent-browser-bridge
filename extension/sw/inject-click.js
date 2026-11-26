@@ -234,7 +234,7 @@ export async function clickInPage(opts) {
     // 可见的标签页里稍等一下再派发事件，让人看清箭头移过去、按下去。
     // 链接/表单提交会立刻跳转，旧页面连同箭头一起被替换——这一等是唯一能
     // "看见"这次点击的机会。后台标签页没人看，不付这份时间。
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible' && isLink) {
       await new Promise((r) => setTimeout(r, 180));
       try {
         const after = el.getBoundingClientRect();
@@ -287,5 +287,6 @@ export async function clickInPage(opts) {
     return { ok: false, error: 'click_failed', message: String(e && e.message ? e.message : e), info };
   }
 
-  return { ok: true, clicked: info, urlBefore: location.href, isMainFrame };
+  // urlAfter 让调用方立刻知道是否已经跳转（同步导航不需要再等）
+  return { ok: true, clicked: info, urlBefore: location.href, urlAfter: location.href, isMainFrame };
 }

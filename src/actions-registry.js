@@ -295,7 +295,7 @@ const ACTIONS = {
     offline: true,
     params: {
       frameId: N, selector: R, text: R, href: R, index: R,
-      allowNonLink: B, dryRun: B
+      allowNonLink: B, dryRun: B, settleMs: N
     },
     checks: [
       TARGET,
@@ -315,7 +315,8 @@ const ACTIONS = {
       href: { type: 'string', description: '按 href 片段定位链接。' },
       index: { type: 'number', description: '多个匹配时取第几个，从 0 开始。先用 dryRun 看清匹配数。' },
       force: { type: 'boolean', description: '允许点击非链接元素、以及绕过破坏性文案拦截。谨慎使用。' },
-      dryRun: { type: 'boolean', description: '只回报会点到什么，不执行。' }
+      dryRun: { type: 'boolean', description: '只回报会点到什么，不执行。' },
+      settleMs: { type: 'number', description: '点击后等待跳转的上限（毫秒，默认 250）。一旦发现地址变化或新标签页就提前返回。' }
     },
     mcpDescription: '点击元素。默认只允许点击链接；按钮等非链接元素会按文案风险分级——'
       + '「编辑/插入/取消」这类直接放行，「删除/提交/发布/保存」这类会被拦下，'
@@ -884,7 +885,7 @@ const CLI_VALUE_OPTS = {
   match: true, url: true, tabId: true, frameId: true, browser: true,
   selector: true, text: true, href: true, index: true,
   value: true, key: true, format: true, code: true, name: true,
-  filename: true, maxBytes: true, count: true,
+  filename: true, maxBytes: true, count: true, settleMs: true,
   idleMs: 'idle'
 };
 
